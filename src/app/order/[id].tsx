@@ -392,6 +392,7 @@ export default function OrderDetailScreen() {
                 onPress={markPaid}
                 style={[
                   styles.primaryAction,
+                  styles.markPaidAction,
                   (saving || (paymentMethodChoice === "other" && !paymentMethodOtherChoice.trim())) &&
                     styles.disabled,
                 ]}
@@ -401,11 +402,6 @@ export default function OrderDetailScreen() {
             ) : null}
           </View>
         ) : null}
-        <Text style={styles.paymentNote}>
-          {order.paymentTrackingAvailable
-            ? "Payment changes are locked after an order is marked paid. Use Edit order to change or reverse payment or status."
-            : "Apply the order payment migration to enable payment tracking. Status and completion controls are available now."}
-        </Text>
       </ContentCard>
 
       <ContentCard style={styles.sectionCard}>
@@ -511,6 +507,9 @@ const styles = StyleSheet.create({
     color: colors.card,
     fontSize: 12,
     fontWeight: "700",
+  },
+  markPaidAction: {
+    marginTop: spacing.sm,
   },
   secondaryAction: {
     alignItems: "center",
@@ -739,11 +738,6 @@ const styles = StyleSheet.create({
     color: colors.brick,
     fontSize: 12,
     fontWeight: "700",
-  },
-  paymentNote: {
-    color: colors.mutedText,
-    fontSize: 10,
-    lineHeight: 15,
   },
   muted: {
     color: colors.mutedText,

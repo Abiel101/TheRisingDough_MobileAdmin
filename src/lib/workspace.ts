@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { OrderStatus } from "@/domain/orders";
+import type { OrderStatus, PaymentMethod } from "@/domain/orders";
 
 export type CustomerRecord = {
   id: string;
@@ -29,6 +29,8 @@ export type OrderRecord = {
   fulfilledDate: string;
   status: OrderStatus;
   paid: boolean;
+  paymentMethod: PaymentMethod | null;
+  paymentMethodOther: string;
   paymentTrackingAvailable: boolean;
   notes: string;
   items: OrderLine[];
@@ -53,6 +55,8 @@ type OrderRow = {
   fulfilled_date: string | null;
   status: OrderStatus;
   paid?: boolean;
+  payment_method?: PaymentMethod | null;
+  payment_method_other?: string | null;
   notes: string;
   created_at: string;
 };
@@ -189,7 +193,7 @@ export async function listOrders(options: {
   };
 
   let result = await queryOrders(
-    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,notes,created_at",
+    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,payment_method,payment_method_other,notes,created_at",
   );
   let paymentTrackingAvailable = true;
   if (isMissingPaymentColumn(result.error)) {
@@ -204,7 +208,7 @@ export async function listOrders(options: {
 
 export async function getOrder(id: string): Promise<OrderRecord | null> {
   const orderColumns =
-    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,notes,created_at";
+    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,payment_method,payment_method_other,notes,created_at";
   let result = await supabase
     .from("admin_orders")
     .select(orderColumns)
@@ -279,6 +283,8 @@ async function mapOrderRows(
       fulfilledDate: row.fulfilled_date ?? "",
       status: row.status,
       paid: row.paid ?? false,
+      paymentMethod: row.payment_method ?? null,
+      paymentMethodOther: row.payment_method_other ?? "",
       paymentTrackingAvailable,
       notes: row.notes,
       items: itemsByOrder.get(row.id) ?? [],
@@ -289,14 +295,27 @@ async function mapOrderRows(
 
 export async function updateOrder(
   id: string,
-  changes: { status?: OrderStatus; paid?: boolean },
+  changes: {
+    status?: OrderStatus;
+    paid?: boolean;
+    paymentMethod?: PaymentMethod | null;
+    paymentMethodOther?: string | null;
+  },
 ): Promise<void> {
-  const values: { status?: OrderStatus; paid?: boolean; fulfilled_date?: string | null } = {};
+  const values: {
+    status?: OrderStatus;
+    paid?: boolean;
+    payment_method?: PaymentMethod | null;
+    payment_method_other?: string | null;
+    fulfilled_date?: string | null;
+  } = {};
   if (changes.status) {
     values.status = changes.status;
     values.fulfilled_date = changes.status === "Fulfilled" ? new Date().toISOString().slice(0, 10) : null;
   }
   if (changes.paid !== undefined) values.paid = changes.paid;
+  if (changes.paymentMethod !== undefined) values.payment_method = changes.paymentMethod;
+  if (changes.paymentMethodOther !== undefined) values.payment_method_other = changes.paymentMethodOther;
 
   const { data, error } = await supabase
     .from("admin_orders")

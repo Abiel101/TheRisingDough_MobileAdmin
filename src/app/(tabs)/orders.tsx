@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { OrderCard } from "@/components/order-card";
 import { ContentCard, FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listOrders, type OrderRecord } from "@/lib/workspace";
-import { orderStatuses } from "@/domain/orders";
+import { orderStatuses, orderStatusLabels, type OrderStatus } from "@/domain/orders";
 import { colors, spacing } from "@/theme/tokens";
 
 const filters = ["All", ...orderStatuses] as const;
@@ -29,6 +29,10 @@ export default function OrdersScreen() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const handleStatusUpdated = useCallback((orderId: string, status: OrderStatus) => {
+    setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, status } : order)));
   }, []);
 
   function refresh() {
@@ -79,7 +83,7 @@ export default function OrdersScreen() {
               onPress={() => setFilter(option)}
             >
               <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                {option}
+                {option === "All" ? option : orderStatusLabels[option]}
               </Text>
             </Pressable>
           );
@@ -105,7 +109,7 @@ export default function OrdersScreen() {
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.teal} />
         }
-        renderItem={({ item }) => <OrderCard order={item} />}
+        renderItem={({ item }) => <OrderCard order={item} onStatusUpdated={handleStatusUpdated} />}
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />

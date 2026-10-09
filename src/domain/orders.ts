@@ -7,6 +7,17 @@ export const orderStatuses = [
 
 export type OrderStatus = (typeof orderStatuses)[number];
 
+export const orderStatusLabels: Record<OrderStatus, string> = {
+  Pending: "Pending",
+  "In progress": "In progress",
+  Ready: "Ready",
+  Fulfilled: "Delivered",
+};
+
+export const paymentMethods = ["cash", "zelle", "other"] as const;
+
+export type PaymentMethod = (typeof paymentMethods)[number];
+
 export type OrderLineItem = {
   productId: string;
   productName: string;

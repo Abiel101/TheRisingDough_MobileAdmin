@@ -2,17 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 
-import { orderStatuses, type OrderStatus } from "@/domain/orders";
+import {
+  orderStatuses,
+  orderStatusLabels,
+  paymentMethods,
+  type OrderStatus,
+  type PaymentMethod,
+} from "@/domain/orders";
 import { formatDate } from "@/components/order-card";
-import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
+import { AppScreen, ContentCard, FormField, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { getOrder, updateOrder, type OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
-const statusLabels: Record<OrderStatus, string> = {
-  Pending: "New",
-  "In progress": "In progress",
-  Ready: "Ready",
-  Fulfilled: "Done",
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  zelle: "Zelle",
+  other: "Other",
 };
 
 function formatCurrency(value: number) {
@@ -31,6 +36,13 @@ export default function OrderDetailScreen() {
   const [order, setOrder] = useState<OrderRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<OrderStatus>("Pending");
+  const [draftPaid, setDraftPaid] = useState(false);
+  const [draftPaymentMethod, setDraftPaymentMethod] = useState<PaymentMethod>("cash");
+  const [draftPaymentMethodOther, setDraftPaymentMethodOther] = useState("");
+  const [paymentMethodChoice, setPaymentMethodChoice] = useState<PaymentMethod>("cash");
+  const [paymentMethodOtherChoice, setPaymentMethodOtherChoice] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -42,6 +54,14 @@ export default function OrderDetailScreen() {
     try {
       const result = await getOrder(id);
       setOrder(result);
+      if (result) {
+        setDraftStatus(result.status);
+        setDraftPaid(result.paid);
+        setDraftPaymentMethod(result.paymentMethod ?? "cash");
+        setDraftPaymentMethodOther(result.paymentMethodOther);
+        setPaymentMethodChoice(result.paymentMethod ?? "cash");
+        setPaymentMethodOtherChoice(result.paymentMethodOther);
+      }
       setError(result ? "" : "This order could not be found.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load this order.");
@@ -54,8 +74,13 @@ export default function OrderDetailScreen() {
     void Promise.resolve().then(load);
   }, [load]);
 
-  async function save(changes: { status?: OrderStatus; paid?: boolean }) {
-    if (!order) return;
+  async function persist(changes: {
+    status?: OrderStatus;
+    paid?: boolean;
+    paymentMethod?: PaymentMethod | null;
+    paymentMethodOther?: string | null;
+  }): Promise<boolean> {
+    if (!order) return false;
     setSaving(true);
     setError("");
     try {
@@ -68,6 +93,9 @@ export default function OrderDetailScreen() {
           ...changes,
           status: nextStatus,
           paid: changes.paid ?? current.paid,
+          paymentMethod: changes.paymentMethod !== undefined ? changes.paymentMethod : current.paymentMethod,
+          paymentMethodOther:
+            changes.paymentMethodOther !== undefined ? changes.paymentMethodOther ?? "" : current.paymentMethodOther,
           fulfilledDate:
             changes.status === "Fulfilled"
               ? todayKey()
@@ -76,11 +104,81 @@ export default function OrderDetailScreen() {
                 : current.fulfilledDate,
         };
       });
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update this order.");
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  function beginEdit() {
+    if (!order) return;
+    setDraftStatus(order.status);
+    setDraftPaid(order.paid);
+    setDraftPaymentMethod(order.paymentMethod ?? "cash");
+    setDraftPaymentMethodOther(order.paymentMethodOther);
+    setEditing(true);
+    setError("");
+  }
+
+  function cancelEdit() {
+    if (!order) return;
+    setDraftStatus(order.status);
+    setDraftPaid(order.paid);
+    setDraftPaymentMethod(order.paymentMethod ?? "cash");
+    setDraftPaymentMethodOther(order.paymentMethodOther);
+    setEditing(false);
+    setError("");
+  }
+
+  async function saveEdits() {
+    if (!order) return;
+    const changes: {
+      status?: OrderStatus;
+      paid?: boolean;
+      paymentMethod?: PaymentMethod | null;
+      paymentMethodOther?: string | null;
+    } = {};
+    if (draftPaid && draftPaymentMethod === "other" && !draftPaymentMethodOther.trim()) {
+      setError("Enter the custom payment method before saving.");
+      return;
+    }
+    if (draftStatus !== order.status) changes.status = draftStatus;
+    if (draftPaid !== order.paid) changes.paid = draftPaid;
+    const nextPaymentMethod = draftPaid ? draftPaymentMethod : null;
+    if (nextPaymentMethod !== order.paymentMethod) changes.paymentMethod = nextPaymentMethod;
+    const nextPaymentMethodOther =
+      draftPaid && draftPaymentMethod === "other" ? draftPaymentMethodOther.trim() : null;
+    if (nextPaymentMethodOther !== (order.paymentMethodOther || null)) {
+      changes.paymentMethodOther = nextPaymentMethodOther;
+    }
+    if (Object.keys(changes).length === 0) {
+      setEditing(false);
+      return;
+    }
+    if (await persist(changes)) setEditing(false);
+  }
+
+  function advanceStatus() {
+    if (!order) return;
+    const nextIndex = orderStatuses.indexOf(order.status) + 1;
+    const nextStatus = orderStatuses[nextIndex];
+    if (nextStatus) void persist({ status: nextStatus });
+  }
+
+  function markPaid() {
+    if (paymentMethodChoice === "other" && !paymentMethodOtherChoice.trim()) {
+      setError("Enter the custom payment method before marking this order paid.");
+      return;
+    }
+    void persist({
+      paid: true,
+      paymentMethod: paymentMethodChoice,
+      paymentMethodOther:
+        paymentMethodChoice === "other" ? paymentMethodOtherChoice.trim() : null,
+    });
   }
 
   if (loading) {
@@ -106,12 +204,45 @@ export default function OrderDetailScreen() {
   const progressIndex = orderStatuses.indexOf(order.status);
   const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
+  const selectedPaymentMethod = editing ? draftPaymentMethod : paymentMethodChoice;
+  const selectedPaymentMethodOther = editing ? draftPaymentMethodOther : paymentMethodOtherChoice;
 
   return (
     <AppScreen>
       <SheetHeader title={`Order ${order.number}`} subtitle="Order details and progress." />
 
       {error ? <MessageCard title="Update failed" message={error} tone="error" /> : null}
+
+      <View style={styles.editActions}>
+        {editing ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={cancelEdit}
+              style={[styles.secondaryAction, saving && styles.disabled]}
+            >
+              <Text style={styles.secondaryActionText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => void saveEdits()}
+              style={[styles.primaryAction, saving && styles.disabled]}
+            >
+              <Text style={styles.primaryActionText}>{saving ? "Saving…" : "Save changes"}</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            onPress={beginEdit}
+            style={styles.secondaryAction}
+          >
+            <Text style={styles.secondaryActionText}>Edit order</Text>
+          </Pressable>
+        )}
+      </View>
 
       <ContentCard style={styles.summaryCard}>
         <View style={styles.summaryTop}>
@@ -132,7 +263,7 @@ export default function OrderDetailScreen() {
                   </Text>
                 </View>
                 <Text numberOfLines={1} style={[styles.progressLabel, complete && styles.progressLabelComplete]}>
-                  {statusLabels[status]}
+                  {orderStatusLabels[status]}
                 </Text>
               </View>
             );
@@ -145,24 +276,50 @@ export default function OrderDetailScreen() {
       </ContentCard>
 
       <ContentCard style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Update status</Text>
-        <View style={styles.statusGrid}>
-          {orderStatuses.map((status) => {
-            const active = order.status === status;
-            return (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: active, disabled: saving }}
-                disabled={saving || active}
-                key={status}
-                onPress={() => void save({ status })}
-                style={[styles.statusOption, active && styles.statusOptionActive, saving && styles.disabled]}
-              >
-                <Text style={[styles.statusText, active && styles.statusTextActive]}>{status}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Text style={styles.sectionTitle}>{editing ? "Edit status" : "Order status"}</Text>
+        {editing ? (
+          <View style={styles.statusGrid}>
+            {orderStatuses.map((status) => {
+              const active = draftStatus === status;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active, disabled: saving }}
+                  disabled={saving}
+                  key={status}
+                  onPress={() => setDraftStatus(status)}
+                  style={[styles.statusOption, active && styles.statusOptionActive, saving && styles.disabled]}
+                >
+                  <Text style={[styles.statusText, active && styles.statusTextActive]}>
+                    {orderStatusLabels[status]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.statusAdvanceRow}>
+            <View style={styles.currentStatusCopy}>
+              <Text style={styles.currentStatusLabel}>Current</Text>
+              <Text style={styles.currentStatus}>{orderStatusLabels[order.status]}</Text>
+            </View>
+            {order.status !== orderStatuses[orderStatuses.length - 1] ? (
+              <View style={styles.nextStatusGroup}>
+                <Text style={styles.statusArrow}>→</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={saving}
+                  onPress={advanceStatus}
+                  style={[styles.primaryAction, saving && styles.disabled]}
+                >
+                  <Text style={styles.primaryActionText}>
+                    {saving ? "Saving…" : orderStatusLabels[orderStatuses[progressIndex + 1]]}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        )}
         <View style={styles.paymentRow}>
           <View style={styles.paymentCopy}>
             <Text style={styles.sectionTitle}>Payment</Text>
@@ -172,18 +329,81 @@ export default function OrderDetailScreen() {
           </View>
           {order.paymentTrackingAvailable ? (
             <Switch
-              accessibilityLabel={order.paid ? "Mark order unpaid" : "Mark order paid"}
-              disabled={saving}
-              onValueChange={(paid) => void save({ paid })}
+              accessibilityLabel={editing ? "Edit payment status" : "Payment status"}
+              disabled={!editing || saving}
+              onValueChange={setDraftPaid}
               thumbColor={colors.card}
               trackColor={{ false: colors.border, true: colors.sage }}
-              value={order.paid}
+              value={editing ? draftPaid : order.paid}
             />
           ) : null}
         </View>
+        {order.paymentTrackingAvailable && order.paid && !editing ? (
+          <InfoRow
+            label="Payment method"
+            value={
+              order.paymentMethod === "other"
+                ? order.paymentMethodOther || "Other"
+                : order.paymentMethod
+                  ? paymentMethodLabels[order.paymentMethod]
+                  : "Not recorded"
+            }
+          />
+        ) : null}
+        {order.paymentTrackingAvailable && (editing || !order.paid) ? (
+          <View style={styles.paymentMethodSection}>
+            <Text style={styles.infoLabel}>Payment method</Text>
+            <View style={styles.methodGrid}>
+              {paymentMethods.map((method) => {
+                const selected = selectedPaymentMethod === method;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected, disabled: saving }}
+                    disabled={saving}
+                    key={method}
+                    onPress={() => {
+                      if (editing) setDraftPaymentMethod(method);
+                      else setPaymentMethodChoice(method);
+                    }}
+                    style={[styles.methodOption, selected && styles.methodOptionSelected, saving && styles.disabled]}
+                  >
+                    <Text style={[styles.methodText, selected && styles.methodTextSelected]}>
+                      {paymentMethodLabels[method]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {selectedPaymentMethod === "other" ? (
+              <FormField
+                autoCapitalize="words"
+                editable={!saving}
+                label="Other payment method"
+                onChangeText={editing ? setDraftPaymentMethodOther : setPaymentMethodOtherChoice}
+                placeholder="Enter payment method"
+                value={selectedPaymentMethodOther}
+              />
+            ) : null}
+            {!editing && !order.paid ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving || (paymentMethodChoice === "other" && !paymentMethodOtherChoice.trim())}
+                onPress={markPaid}
+                style={[
+                  styles.primaryAction,
+                  (saving || (paymentMethodChoice === "other" && !paymentMethodOtherChoice.trim())) &&
+                    styles.disabled,
+                ]}
+              >
+                <Text style={styles.primaryActionText}>{saving ? "Saving…" : "Mark as paid"}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <Text style={styles.paymentNote}>
           {order.paymentTrackingAvailable
-            ? "This records payment status for the order. It does not charge a payment method."
+            ? "Payment changes are locked after an order is marked paid. Use Edit order to change or reverse payment or status."
             : "Apply the order payment migration to enable payment tracking. Status and completion controls are available now."}
         </Text>
       </ContentCard>
@@ -271,6 +491,41 @@ const styles = StyleSheet.create({
   title: {
     color: colors.espresso,
     fontSize: 24,
+    fontWeight: "700",
+  },
+  editActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: spacing.sm,
+  },
+  primaryAction: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+    borderRadius: 12,
+    backgroundColor: colors.teal,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  primaryActionText: {
+    color: colors.card,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  secondaryAction: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  secondaryActionText: {
+    color: colors.teal,
+    fontSize: 12,
     fontWeight: "700",
   },
   closeButton: {
@@ -380,6 +635,34 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.xs,
   },
+  statusAdvanceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  currentStatusCopy: {
+    gap: 2,
+  },
+  currentStatusLabel: {
+    color: colors.mutedText,
+    fontSize: 10,
+  },
+  currentStatus: {
+    color: colors.espresso,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  nextStatusGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  statusArrow: {
+    color: colors.teal,
+    fontSize: 20,
+    fontWeight: "700",
+  },
   statusOption: {
     flexGrow: 1,
     flexBasis: "48%",
@@ -417,6 +700,35 @@ const styles = StyleSheet.create({
   },
   paymentCopy: {
     gap: 2,
+  },
+  paymentMethodSection: {
+    gap: spacing.xs,
+  },
+  methodGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  methodOption: {
+    minHeight: 36,
+    justifyContent: "center",
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    backgroundColor: colors.parchment,
+    paddingHorizontal: spacing.md,
+  },
+  methodOptionSelected: {
+    borderColor: colors.teal,
+    backgroundColor: colors.teal,
+  },
+  methodText: {
+    color: colors.espresso,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  methodTextSelected: {
+    color: colors.card,
   },
   paidText: {
     color: colors.sage,

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "The Rising Dough",
-    "slug": "the-rising-dough",
+    "slug": "therisingdoughadminmobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -38,6 +38,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "047a663c-db4f-4cc1-9a03-daa2b5ba2ce8"
+      }
+    },
+    "owner": "forgepointlab"
   }
 }

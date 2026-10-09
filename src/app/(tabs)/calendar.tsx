@@ -3,6 +3,7 @@ import { useFocusEffect } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { OrderCard } from "@/components/order-card";
+import type { OrderStatus } from "@/domain/orders";
 import {
   AppScreen,
   ContentCard,
@@ -67,6 +68,10 @@ export default function CalendarScreen() {
       setLoading(false);
     }
   }, [monthEnd, monthStart]);
+
+  const handleStatusUpdated = useCallback((orderId: string, status: OrderStatus) => {
+    setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, status } : order)));
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -168,7 +173,11 @@ export default function CalendarScreen() {
       {!loading && !error && selectedOrders.length === 0 ? (
         <MessageCard title="No orders on this day" message="Choose another date to see its due orders." />
       ) : null}
-      {!loading && !error ? selectedOrders.map((order) => <OrderCard key={order.id} order={order} />) : null}
+      {!loading && !error
+        ? selectedOrders.map((order) => (
+            <OrderCard key={order.id} order={order} onStatusUpdated={handleStatusUpdated} />
+          ))
+        : null}
     </AppScreen>
   );
 }

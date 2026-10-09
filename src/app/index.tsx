@@ -1,98 +1,124 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from "react";
+import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useAuth } from "@/auth/auth-context";
+import { NativeButton } from "@/components/ui/native-button";
+import { NativeText } from "@/components/ui/native-text";
+import { AppScreen, ContentCard, FormField, styles as uiStyles } from "@/components/ui/screen-primitives";
+import { supabaseConfigured } from "@/lib/supabase";
+import { colors, spacing } from "@/theme/tokens";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+export default function SignInScreen() {
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSignIn() {
+    setSubmitting(true);
+    setError("");
+    try {
+      await signIn(email, password);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not sign in.");
+    } finally {
+      setSubmitting(false);
+    }
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <AppScreen>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.page}
+      >
+        <View style={styles.brandMark}>
+          <NativeText textStyle={styles.brandMarkText}>RD</NativeText>
+        </View>
+        <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
+        <NativeText textStyle={styles.title}>Welcome back.</NativeText>
+        <NativeText textStyle={styles.subtitle}>
+          Sign in with the owner or staff account connected to your bakery.
+        </NativeText>
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+        <ContentCard style={styles.form}>
+          {!supabaseConfigured ? (
+            <NativeText textStyle={styles.error}>
+              Supabase is not configured. Add the project URL and publishable key to .env.local, then restart Expo.
+            </NativeText>
+          ) : null}
+          <FormField
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            label="Email"
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            textContentType="emailAddress"
+            value={email}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+          <FormField
+            autoCapitalize="none"
+            autoComplete="password"
+            label="Password"
+            onChangeText={setPassword}
+            placeholder="Your password"
+            secureTextEntry
+            textContentType="password"
+            value={password}
           />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+          {error ? <NativeText textStyle={styles.error}>{error}</NativeText> : null}
+          <NativeButton
+            disabled={!supabaseConfigured || !email.trim() || !password || submitting}
+            label={submitting ? "Signing in…" : "Sign in"}
+            onPress={handleSignIn}
+          />
+        </ContentCard>
+      </KeyboardAvoidingView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    justifyContent: "center",
+    gap: spacing.md,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+  brandMark: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: colors.teal,
+    marginBottom: spacing.sm,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+  brandMarkText: {
+    color: colors.card,
+    fontSize: 19,
+    fontWeight: "700",
+    textAlign: "center",
   },
+  eyebrow: uiStyles.eyebrow,
   title: {
-    textAlign: 'center',
+    color: colors.espresso,
+    fontSize: 34,
+    fontWeight: "700",
+    lineHeight: 40,
   },
-  code: {
-    textTransform: 'uppercase',
+  subtitle: {
+    color: colors.mutedText,
+    fontSize: 15,
+    lineHeight: 22,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  form: {
+    marginTop: spacing.md,
+  },
+  error: {
+    color: colors.brick,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

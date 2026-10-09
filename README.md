@@ -1,56 +1,35 @@
-# Welcome to your Expo app 👋
+# The Rising Dough
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo and React Native application for The Rising Dough. The project uses Expo Router and TypeScript.
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Start the app
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Use the Expo Go app to preview supported features, or create a development build when the project adds native modules that Expo Go does not include.
 
-### Other setup steps
+## Supabase connection and sign-in
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+The app reads `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from `.env.local`. It also accepts `EXPO_PUBLIC_SUPABASE_KEY` for the existing local key name. Restart Expo after changing environment values. These public client values are included in the app bundle; never put a service-role key, database password, or other privileged secret in this app. Data requests use the signed-in user's session and the existing row-level security policies. Sign in with an existing owner or staff email and password.
 
-## Learn more
+Order payment status uses the additive migration in `supabase/migrations/20261009000000_add_order_payment_status.sql`. Apply it to the Supabase project before using the order payment switch. It only adds an owner-managed `paid` flag; it does not charge a payment method.
 
-To learn more about developing your project with Expo, look at the following resources:
+Native sessions are stored with Expo SecureStore. The app reads the existing `admin_customer_list`, `admin_products`, `admin_orders`, and `admin_order_items` tables. It can add customers and catalog items, remove catalog entries, browse orders, and select saved customers or catalog items in the current screen. The database schema has no product availability field, so product selection is session-local until an order workflow or availability field is added.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Project foundation
 
-## Join the community
+- `src/theme/tokens.ts` contains the bakery color and spacing tokens. The Inter and Noto Serif font assets still need to be added before those families can be used.
+- `src/domain/orders.ts` contains shared customer/order types, the order statuses, and the saved-price total calculation.
+- `src/components/ui/native-text.tsx` and `native-button.tsx` wrap Expo UI's universal native text and button components. These use SwiftUI on Apple platforms and Jetpack Compose on Android; keep platform-specific imports in platform-specific files when a screen needs controls unique to one OS.
+- `src/app/` contains Expo Router routes. The sign-in route protects four native tabs: Calendar, Orders, Catalog, and Customers. The tab bar uses the platform's native navigation components.
+- `example/` is an archived starter and is excluded from the active TypeScript project.
 
-Join our community of developers creating universal apps.
+## Checks
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npx expo lint
+npx tsc --noEmit
+```

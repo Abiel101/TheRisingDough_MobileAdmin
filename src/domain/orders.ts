@@ -5,13 +5,14 @@ export const orderStatuses = [
   "Fulfilled",
 ] as const;
 
-export type OrderStatus = (typeof orderStatuses)[number];
+export type OrderStatus = (typeof orderStatuses)[number] | "Cancelled";
 
 export const orderStatusLabels: Record<OrderStatus, string> = {
   Pending: "Pending",
   "In progress": "In progress",
   Ready: "Ready",
   Fulfilled: "Delivered",
+  Cancelled: "Cancelled",
 };
 
 export const paymentMethods = ["cash", "zelle", "other"] as const;

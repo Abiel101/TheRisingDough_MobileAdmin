@@ -3,11 +3,9 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useAuth } from "@/auth/auth-context";
 import { NativeButton } from "@/components/ui/native-button";
-import { NativeText } from "@/components/ui/native-text";
-import { ContentCard, FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
-import { addProduct, listProducts, type ProductRecord } from "@/lib/workspace";
+import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { listProducts, type ProductRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -15,14 +13,9 @@ function formatCurrency(value: number) {
 }
 
 export default function CatalogScreen() {
-  const { session } = useAuth();
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -48,63 +41,17 @@ export default function CatalogScreen() {
     ? products.filter((product) => product.name.toLocaleLowerCase().includes(query))
     : products;
 
-  async function handleAddProduct() {
-    const parsedPrice = Number(price);
-    if (!session?.user.id) return;
-    if (!name.trim() || !price.trim() || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      setError("Enter an item name and a price of zero or more.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const product = await addProduct(session.user.id, name, parsedPrice);
-      setProducts((current) => [...current, product].sort((a, b) => a.name.localeCompare(b.name)));
-      setName("");
-      setPrice("");
-      setShowForm(false);
-      router.push({ pathname: "/catalog/[id]", params: { id: product.id } });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not add this catalog item.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const header = (
     <View style={styles.listHeader}>
       <ScreenHeader title="Item catalog" subtitle="Browse current products and open an item to see its details." />
-      <ContentCard style={styles.summaryCard}>
-        <Text style={styles.summaryCount}>{products.length}</Text>
-        <Text style={styles.summaryLabel}>items in your catalog</Text>
-      </ContentCard>
 
       <View style={styles.actionRow}>
         <Text style={styles.sectionTitle}>Available items</Text>
         <NativeButton
-          label={showForm ? "Cancel" : "Add item"}
-          onPress={() => {
-            setError("");
-            setShowForm((visible) => !visible);
-          }}
-          variant={showForm ? "text" : "filled"}
+          label="Add item"
+          onPress={() => router.push("/catalog/new")}
         />
       </View>
-
-      {showForm ? (
-        <ContentCard style={styles.form}>
-          <NativeText textStyle={styles.formTitle}>Add to catalog</NativeText>
-          <FormField label="Item name" onChangeText={setName} placeholder="e.g. Sourdough loaf" value={name} />
-          <FormField
-            keyboardType="decimal-pad"
-            label="Unit price (USD)"
-            onChangeText={setPrice}
-            placeholder="0.00"
-            value={price}
-          />
-          <NativeButton disabled={saving || !name.trim() || !price.trim()} label={saving ? "Saving…" : "Save item"} onPress={handleAddProduct} />
-        </ContentCard>
-      ) : null}
 
       <FormField
         accessibilityLabel="Search catalog items"
@@ -157,13 +104,8 @@ const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
   listHeader: { gap: spacing.md, marginBottom: spacing.xs },
-  summaryCard: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm, padding: spacing.md },
-  summaryCount: { color: colors.teal, fontSize: 22, fontWeight: "700" },
-  summaryLabel: { color: colors.mutedText, fontSize: 13 },
   actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
-  form: { gap: spacing.md },
-  formTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   productCard: {
     flexDirection: "row",
     alignItems: "center",

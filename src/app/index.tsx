@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { useAuth } from "@/auth/auth-context";
 import { NativeButton } from "@/components/ui/native-button";
+import { NativeFormField } from "@/components/ui/native-form-field";
 import { NativeText } from "@/components/ui/native-text";
-import { AppScreen, ContentCard, FormField, styles as uiStyles } from "@/components/ui/screen-primitives";
+import { AppScreen, ContentCard, styles as uiStyles } from "@/components/ui/screen-primitives";
 import { supabaseConfigured } from "@/lib/supabase";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -12,6 +13,7 @@ export default function SignInScreen() {
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -29,10 +31,7 @@ export default function SignInScreen() {
 
   return (
     <AppScreen>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.page}
-      >
+      <View style={styles.page}>
         <View style={styles.brandMark}>
           <NativeText textStyle={styles.brandMarkText}>RD</NativeText>
         </View>
@@ -48,24 +47,27 @@ export default function SignInScreen() {
               Supabase is not configured. Add the project URL and publishable key to .env.local, then restart Expo.
             </NativeText>
           ) : null}
-          <FormField
+          <NativeFormField
             autoCapitalize="none"
             autoComplete="email"
             keyboardType="email-address"
             label="Email"
             onChangeText={setEmail}
             placeholder="you@example.com"
-            textContentType="emailAddress"
             value={email}
           />
-          <FormField
+          <NativeFormField
             autoCapitalize="none"
             autoComplete="password"
             label="Password"
             onChangeText={setPassword}
             placeholder="Your password"
-            secureTextEntry
-            textContentType="password"
+            secureTextEntry={!passwordVisible}
+            trailingAction={{
+              label: passwordVisible ? "Hide" : "Show",
+              accessibilityLabel: passwordVisible ? "Hide password" : "Show password",
+              onPress: () => setPasswordVisible((visible) => !visible),
+            }}
             value={password}
           />
           {error ? <NativeText textStyle={styles.error}>{error}</NativeText> : null}
@@ -75,15 +77,15 @@ export default function SignInScreen() {
             onPress={handleSignIn}
           />
         </ContentCard>
-      </KeyboardAvoidingView>
+      </View>
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
   page: {
-    flex: 1,
-    justifyContent: "center",
+    flexGrow: 1,
+    justifyContent: "flex-start",
     gap: spacing.md,
   },
   brandMark: {

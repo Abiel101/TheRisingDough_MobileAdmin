@@ -17,6 +17,7 @@ export type OrderLine = {
   price: number;
   quantity: number;
 };
+export type OrderItemInput = { product: ProductRecord; quantity: number };
 export type OrderRecord = {
   id: string;
   number: string;
@@ -106,6 +107,47 @@ export async function getCustomer(id: string): Promise<CustomerRecord | null> {
     .maybeSingle();
   throwIfError(error);
   return data ? mapCustomer(data as CustomerRow) : null;
+}
+
+export async function updateCustomer(
+  id: string,
+  input: Pick<CustomerRecord, "name" | "phone" | "email" | "address">,
+): Promise<void> {
+  const phone = input.phone.trim();
+  if (!phone) throw new Error("A phone number is required.");
+  const { data, error } = await supabase
+    .from("admin_customer_list")
+    .update({
+      name: input.name.trim() || null,
+      phone,
+      email: input.email.trim() || null,
+      address: input.address.trim() || null,
+    })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Customer was not found for this account.");
+}
+
+export async function deleteCustomer(id: string): Promise<void> {
+  // Keep the historical order and customer-name snapshot when removing a profile.
+  const customer = await getCustomer(id);
+  if (!customer) throw new Error("Customer was not found for this account.");
+  const { error: detachError } = await supabase
+    .from("admin_orders")
+    .update({ customer_id: null, customer_name: customer.name.trim() || customer.phone })
+    .eq("customer_id", id);
+  throwIfError(detachError);
+
+  const { data, error } = await supabase
+    .from("admin_customer_list")
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Customer was not found for this account.");
 }
 
 export async function addCustomer(
@@ -300,6 +342,8 @@ export async function updateOrder(
     paid?: boolean;
     paymentMethod?: PaymentMethod | null;
     paymentMethodOther?: string | null;
+    dueDate?: string;
+    notes?: string;
   },
 ): Promise<void> {
   const values: {
@@ -308,6 +352,8 @@ export async function updateOrder(
     payment_method?: PaymentMethod | null;
     payment_method_other?: string | null;
     fulfilled_date?: string | null;
+    due_date?: string;
+    notes?: string;
   } = {};
   if (changes.status) {
     values.status = changes.status;
@@ -316,10 +362,123 @@ export async function updateOrder(
   if (changes.paid !== undefined) values.paid = changes.paid;
   if (changes.paymentMethod !== undefined) values.payment_method = changes.paymentMethod;
   if (changes.paymentMethodOther !== undefined) values.payment_method_other = changes.paymentMethodOther;
+  if (changes.dueDate !== undefined) values.due_date = changes.dueDate;
+  if (changes.notes !== undefined) values.notes = changes.notes.trim();
 
   const { data, error } = await supabase
     .from("admin_orders")
     .update(values)
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Order was not found for this account.");
+}
+
+function validateOrderItems(items: OrderItemInput[]) {
+  if (!items.length || items.some(({ product, quantity }) => !product.id || quantity < 1 || !Number.isInteger(quantity))) {
+    throw new Error("Add at least one item with a valid quantity.");
+  }
+}
+
+async function insertOrderItems(ownerId: string, orderId: string, items: OrderItemInput[]) {
+  const { error } = await supabase.from("admin_order_items").insert(
+    items.map(({ product, quantity }) => ({
+      owner_id: ownerId,
+      order_id: orderId,
+      catalog_product_id: product.id,
+      item_name: product.name,
+      unit_price: product.price,
+      quantity,
+    })),
+  );
+  throwIfError(error);
+}
+
+export async function createOrder(input: {
+  ownerId: string;
+  customer: CustomerRecord;
+  dueDate: string;
+  notes: string;
+  items: OrderItemInput[];
+}): Promise<string> {
+  validateOrderItems(input.items);
+  const { data: latest, error: latestError } = await supabase
+    .from("admin_orders")
+    .select("order_number")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  throwIfError(latestError);
+  const latestNumber = /^RD-(\d+)$/.exec(latest?.order_number ?? "");
+  const nextNumber = String((latestNumber ? Number(latestNumber[1]) : 0) + 1).padStart(4, "0");
+  const { data: order, error } = await supabase
+    .from("admin_orders")
+    .insert({
+      owner_id: input.ownerId,
+      order_number: `RD-${nextNumber}`,
+      customer_id: input.customer.id,
+      customer_name: input.customer.name.trim() || input.customer.phone,
+      due_date: input.dueDate,
+      status: "Pending",
+      paid: false,
+      notes: input.notes.trim(),
+    })
+    .select("id")
+    .single();
+  throwIfError(error);
+  if (!order) throw new Error("Supabase returned no order record.");
+
+  try {
+    await insertOrderItems(input.ownerId, order.id, input.items);
+  } catch (cause) {
+    await supabase.from("admin_orders").delete().eq("id", order.id);
+    throw cause;
+  }
+  return order.id;
+}
+
+export async function addItemsToOrder(
+  ownerId: string,
+  orderId: string,
+  items: OrderItemInput[],
+): Promise<void> {
+  validateOrderItems(items);
+  const { data, error } = await supabase
+    .from("admin_order_items")
+    .select("id,catalog_product_id,unit_price,quantity")
+    .eq("order_id", orderId);
+  throwIfError(error);
+  const current = (data ?? []) as {
+    id: string;
+    catalog_product_id: string | null;
+    unit_price: number | string;
+    quantity: number;
+  }[];
+  const nextItems = new Map(current.map((item) => [`${item.catalog_product_id ?? ""}:${Number(item.unit_price)}`, item]));
+  const newItems: OrderItemInput[] = [];
+
+  for (const input of items) {
+    const key = `${input.product.id}:${input.product.price}`;
+    const existing = nextItems.get(key);
+    if (!existing) {
+      newItems.push(input);
+      continue;
+    }
+    const { error: updateError } = await supabase
+      .from("admin_order_items")
+      .update({ quantity: existing.quantity + input.quantity })
+      .eq("id", existing.id);
+    throwIfError(updateError);
+    nextItems.set(key, { ...existing, quantity: existing.quantity + input.quantity });
+  }
+  if (newItems.length) await insertOrderItems(ownerId, orderId, newItems);
+}
+
+export async function deleteOrder(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("admin_orders")
+    .delete()
     .eq("id", id)
     .select("id")
     .maybeSingle();

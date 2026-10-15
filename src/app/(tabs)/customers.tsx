@@ -3,24 +3,15 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useAuth } from "@/auth/auth-context";
 import { NativeButton } from "@/components/ui/native-button";
-import { NativeText } from "@/components/ui/native-text";
-import { ContentCard, FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
-import { addCustomer, listCustomers, type CustomerRecord } from "@/lib/workspace";
+import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { listCustomers, type CustomerRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 export default function CustomersScreen() {
-  const { session } = useAuth();
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -48,74 +39,17 @@ export default function CustomersScreen() {
       )
     : customers;
 
-  async function handleAddCustomer() {
-    if (!session?.user.id) return;
-    if (!phone.trim()) {
-      setError("A phone number is required to add a customer.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const customer = await addCustomer(session.user.id, { name, phone, email, address });
-      setCustomers((current) => [...current, customer].sort((a, b) => a.name.localeCompare(b.name)));
-      setName("");
-      setPhone("");
-      setEmail("");
-      setAddress("");
-      setShowForm(false);
-      router.push({ pathname: "/customer/[id]", params: { id: customer.id } });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save this customer.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const header = (
     <View style={styles.listHeader}>
       <ScreenHeader title="Customers" subtitle="Browse customer records and open one for contact details." />
-      <ContentCard style={styles.summaryCard}>
-        <Text style={styles.summaryCount}>{customers.length}</Text>
-        <Text style={styles.summaryLabel}>saved customers</Text>
-      </ContentCard>
 
       <View style={styles.actionRow}>
         <Text style={styles.sectionTitle}>Customer list</Text>
         <NativeButton
-          label={showForm ? "Cancel" : "Add customer"}
-          onPress={() => {
-            setError("");
-            setShowForm((visible) => !visible);
-          }}
-          variant={showForm ? "text" : "filled"}
+          label="Add customer"
+          onPress={() => { setError(""); router.push("/customer/new"); }}
         />
       </View>
-
-      {showForm ? (
-        <ContentCard style={styles.form}>
-          <NativeText textStyle={styles.formTitle}>New customer</NativeText>
-          <FormField label="Name (optional)" onChangeText={setName} placeholder="Customer name" value={name} />
-          <FormField
-            autoComplete="tel"
-            keyboardType="phone-pad"
-            label="Phone number (required)"
-            onChangeText={setPhone}
-            placeholder="Phone number"
-            value={phone}
-          />
-          <FormField
-            autoCapitalize="none"
-            keyboardType="email-address"
-            label="Email (optional)"
-            onChangeText={setEmail}
-            placeholder="name@example.com"
-            value={email}
-          />
-          <FormField label="Address (optional)" onChangeText={setAddress} placeholder="Street address" value={address} />
-          <NativeButton disabled={saving || !phone.trim()} label={saving ? "Saving…" : "Save customer"} onPress={handleAddCustomer} />
-        </ContentCard>
-      ) : null}
 
       <FormField
         accessibilityLabel="Search saved customers"
@@ -169,13 +103,8 @@ const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
   listHeader: { gap: spacing.md, marginBottom: spacing.xs },
-  summaryCard: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm, padding: spacing.md },
-  summaryCount: { color: colors.teal, fontSize: 22, fontWeight: "700" },
-  summaryLabel: { color: colors.mutedText, fontSize: 13 },
   actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
-  form: { gap: spacing.md },
-  formTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   customerCard: {
     flexDirection: "row",
     alignItems: "center",

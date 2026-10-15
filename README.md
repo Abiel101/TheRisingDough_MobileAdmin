@@ -15,9 +15,9 @@ Use the Expo Go app to preview supported features, or create a development build
 
 The app reads `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from `.env.local`. It also accepts `EXPO_PUBLIC_SUPABASE_KEY` for the existing local key name. Restart Expo after changing environment values. These public client values are included in the app bundle; never put a service-role key, database password, or other privileged secret in this app. Data requests use the signed-in user's session and the existing row-level security policies. Sign in with an existing owner or staff email and password.
 
-Order payment status uses the additive migration in `supabase/migrations/20261009000000_add_order_payment_status.sql`. Apply it to the Supabase project before using the order payment switch. It only adds an owner-managed `paid` flag; it does not charge a payment method.
+Order payment status uses the additive migration in `supabase/migrations/20261009000000_add_order_payment_status.sql`. The `supabase/migrations/20261015072438_add_cancelled_order_status.sql` migration adds the Cancelled status to the admin order constraint.
 
-Native sessions are stored with Expo SecureStore. The app reads the existing `admin_customer_list`, `admin_products`, `admin_orders`, and `admin_order_items` tables. It can add customers and catalog items, remove catalog entries, browse orders, and select saved customers or catalog items in the current screen. The database schema has no product availability field, so product selection is session-local until an order workflow or availability field is added.
+Native sessions are stored with Expo SecureStore. The app reads the existing `admin_customer_list`, `admin_products`, `admin_orders`, and `admin_order_items` tables. It can add, edit, and delete customers; add and remove catalog items; create, edit, cancel, and delete orders; and add catalog items to existing orders. Deleting a customer keeps existing orders and their customer-name snapshot. Orders appear in Active, Completed, or Cancelled views; paid and fulfilled orders appear in Completed and are marked with green dots on the calendar. The calendar can show a compact month or week view.
 
 ## Project foundation
 

@@ -1,20 +1,30 @@
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { OrderCard } from "@/components/order-card";
-import { ContentCard, FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { NativeButton } from "@/components/ui/native-button";
+import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listOrders, type OrderRecord } from "@/lib/workspace";
-import { orderStatuses, orderStatusLabels, type OrderStatus } from "@/domain/orders";
+import type { OrderStatus } from "@/domain/orders";
 import { colors, spacing } from "@/theme/tokens";
 
-const filters = ["All", ...orderStatuses] as const;
-type Filter = (typeof filters)[number];
+type OrderView = "Active" | "Completed" | "Cancelled";
+
+function isCompleted(order: OrderRecord) {
+  return order.status === "Fulfilled" && order.paid;
+}
+
+function belongsInView(order: OrderRecord, view: OrderView) {
+  if (view === "Cancelled") return order.status === "Cancelled";
+  if (view === "Completed") return isCompleted(order);
+  return order.status !== "Cancelled" && !isCompleted(order);
+}
 
 export default function OrdersScreen() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
-  const [filter, setFilter] = useState<Filter>("All");
+  const [orderView, setOrderView] = useState<OrderView>("Active");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,22 +59,33 @@ export default function OrdersScreen() {
   const visibleOrders = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return orders.filter((order) => {
-      const matchesStatus = filter === "All" || order.status === filter;
+      const matchesView = belongsInView(order, orderView);
       const matchesSearch =
         !query ||
         order.number.toLocaleLowerCase().includes(query) ||
         order.customer.toLocaleLowerCase().includes(query);
-      return matchesStatus && matchesSearch;
+      return matchesView && matchesSearch;
     });
-  }, [filter, orders, search]);
+  }, [orderView, orders, search]);
+
+  const hasOrdersInView = orders.some((order) => belongsInView(order, orderView));
 
   const header = (
     <View style={styles.listHeader}>
       <ScreenHeader title="Orders" subtitle="A clear view of every order in the queue." />
-      <ContentCard style={styles.summaryCard}>
-        <Text style={styles.summaryCount}>{orders.length}</Text>
-        <Text style={styles.summaryLabel}>recent orders loaded</Text>
-      </ContentCard>
+      <View style={styles.actionRow}>
+        <Text style={styles.sectionTitle}>{orderView} orders</Text>
+        <NativeButton label="Add order" onPress={() => router.push("/order/new")} />
+      </View>
+      <View style={styles.viewSwitch}>
+        {(["Active", "Completed", "Cancelled"] as const).map((view) => (
+          <Pressable key={view} onPress={() => setOrderView(view)} style={[styles.viewButton, orderView === view && styles.viewButtonActive]}>
+            <Text style={[styles.viewButtonText, orderView === view && styles.viewButtonTextActive]}>
+              {view} ({orders.filter((order) => belongsInView(order, view)).length})
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       <FormField
         accessibilityLabel="Search orders or customers"
         label="Search"
@@ -72,28 +93,11 @@ export default function OrdersScreen() {
         placeholder="Order number or customer"
         value={search}
       />
-      <View style={styles.filterList}>
-        {filters.map((option) => {
-          const active = option === filter;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              key={option}
-              style={[styles.filterChip, active && styles.activeFilter]}
-              onPress={() => setFilter(option)}
-            >
-              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                {option === "All" ? option : orderStatusLabels[option]}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
       {error ? <MessageCard title="Orders unavailable" message={error} tone="error" /> : null}
       {!loading && !error && visibleOrders.length === 0 ? (
         <MessageCard
-          title={orders.length ? "No matching orders" : "No orders yet"}
-          message={orders.length ? "Try another search or status filter." : "Orders from your workspace will appear here."}
+          title={hasOrdersInView ? "No matching orders" : `No ${orderView.toLowerCase()} orders yet`}
+          message={hasOrdersInView ? "Try another search." : orderView === "Completed" ? "Orders move here when they are fulfilled and paid." : orderView === "Cancelled" ? "Cancelled orders will be kept here." : "Add an order to get started. Fulfilled but unpaid orders remain active."}
         />
       ) : null}
     </View>
@@ -127,51 +131,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
+    paddingBottom: spacing.lg,
     gap: spacing.md,
   },
   listHeader: {
     gap: spacing.lg,
     marginBottom: spacing.sm,
   },
-  summaryCard: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-  },
-  summaryCount: {
-    color: colors.teal,
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  summaryLabel: {
-    color: colors.mutedText,
-    fontSize: 13,
-  },
-  filterList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  filterChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: 999,
-    gap: 0,
-  },
-  activeFilter: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
-  },
-  filterText: {
-    color: colors.espresso,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  activeFilterText: {
-    color: colors.card,
-  },
-  filterChipText: { color: colors.espresso, fontSize: 12, fontWeight: "600" },
-  filterChipTextActive: { color: colors.card },
+  actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
+  viewSwitch: { flexDirection: "row", padding: 3, borderRadius: 13, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  viewButton: { flex: 1, minHeight: 38, alignItems: "center", justifyContent: "center", borderRadius: 10 },
+  viewButtonActive: { backgroundColor: colors.teal },
+  viewButtonText: { color: colors.mutedText, fontSize: 13, fontWeight: "600" },
+  viewButtonTextActive: { color: colors.card },
 });

@@ -1,5 +1,6 @@
 import { Host, Text as ExpoText, type TextProps } from "@expo/ui";
 import type { ReactNode } from "react";
+import { Platform, Text, type TextStyle } from "react-native";
 
 import { colors } from "@/theme/tokens";
 
@@ -22,6 +23,15 @@ export function NativeText({
   numberOfLines,
 }: NativeTextProps) {
   const text = toPlainText(children);
+
+  if (Platform.OS === "android") {
+    return (
+      <Text numberOfLines={numberOfLines} style={textStyle as TextStyle | undefined}>
+        {text}
+      </Text>
+    );
+  }
+
   return (
     <Host
       colorScheme="light"

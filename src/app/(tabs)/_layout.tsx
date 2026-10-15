@@ -1,16 +1,30 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 
+import { resetCalendarToToday } from "@/lib/calendar-navigation";
 import { colors } from "@/theme/tokens";
 
 export default function WorkspaceTabs() {
   return (
     <NativeTabs
       backgroundColor={colors.card}
+      disableIndicator
       iconColor={{ default: colors.mutedText, selected: colors.teal }}
-      indicatorColor={colors.cream}
+      labelStyle={{
+        default: { color: colors.mutedText, fontSize: 10, fontWeight: "500" },
+        selected: { color: colors.teal, fontSize: 10, fontWeight: "700" },
+      }}
       labelVisibilityMode="labeled"
+      rippleColor={colors.cream}
     >
-      <NativeTabs.Trigger name="calendar">
+      <NativeTabs.Trigger
+        name="calendar"
+        listeners={({ navigation, route }) => ({
+          tabPress: () => {
+            const state = navigation.getState();
+            if (state.routes[state.index]?.key === route.key) resetCalendarToToday();
+          },
+        })}
+      >
         <NativeTabs.Trigger.Label>Calendar</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />
       </NativeTabs.Trigger>

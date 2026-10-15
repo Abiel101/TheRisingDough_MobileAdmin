@@ -22,7 +22,7 @@ export function OrderCard({
   const [statusError, setStatusError] = useState("");
   const status = order.status;
 
-  const nextStatus = orderStatuses[orderStatuses.indexOf(status) + 1];
+  const nextStatus = status === "Cancelled" ? undefined : orderStatuses[orderStatuses.indexOf(status) + 1];
 
   async function advanceStatus(closeSwipe: () => void) {
     if (!nextStatus || updatingStatus) return;
@@ -115,7 +115,7 @@ export function OrderCard({
 }
 
 export function StatusPill({ status, paid }: { status: OrderRecord["status"]; paid?: boolean }) {
-  const color = status === "Ready" || status === "Fulfilled" ? colors.sage : colors.teal;
+  const color = status === "Cancelled" ? colors.brick : status === "Ready" || status === "Fulfilled" ? colors.sage : colors.teal;
   const background = status === "Pending" ? colors.cream : colors.parchment;
   return (
     <View style={[styles.pill, { backgroundColor: background }]}>

@@ -10,15 +10,16 @@ import {
   type TextInputProps,
   type ViewProps,
 } from "react-native";
+import type { ReactNode } from "react";
 import { router } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type SafeAreaViewProps } from "react-native-safe-area-context";
 
 import { NativeText } from "@/components/ui/native-text";
 import { colors, spacing } from "@/theme/tokens";
 
-export function AppScreen({ children, ...scrollProps }: ScrollViewProps) {
+export function AppScreen({ children, safeAreaEdges, ...scrollProps }: ScrollViewProps & { safeAreaEdges?: SafeAreaViewProps["edges"] }) {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={safeAreaEdges} style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -68,10 +69,12 @@ export function SheetHeader({
   title,
   subtitle,
   showSettings = true,
+  rightAction,
 }: {
   title: string;
   subtitle?: string;
   showSettings?: boolean;
+  rightAction?: ReactNode;
 }) {
   return (
     <View style={styles.sheetHeader}>
@@ -82,6 +85,7 @@ export function SheetHeader({
       </View>
       <View style={styles.sheetActions}>
         {showSettings ? <SettingsButton /> : null}
+        {rightAction}
         <Pressable
           accessibilityLabel="Close"
           accessibilityRole="button"
@@ -277,7 +281,7 @@ export const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 12,
     borderWidth: 1,
-    backgroundColor: colors.parchment,
+    backgroundColor: colors.card,
     color: colors.espresso,
     fontSize: 16,
     paddingHorizontal: spacing.md,

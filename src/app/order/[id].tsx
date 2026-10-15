@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
+import { useAuth } from "@/auth/auth-context";
 import {
   orderStatuses,
   orderStatusLabels,
@@ -10,8 +11,10 @@ import {
   type PaymentMethod,
 } from "@/domain/orders";
 import { formatDate } from "@/components/order-card";
+import { NativeConfirmButton } from "@/components/ui/native-confirm-button";
+import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { AppScreen, ContentCard, FormField, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { getOrder, updateOrder, type OrderRecord } from "@/lib/workspace";
+import { addItemsToOrder, deleteOrder, getOrder, listProducts, updateOrder, type OrderRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 const paymentMethodLabels: Record<PaymentMethod, string> = {
@@ -31,6 +34,7 @@ function todayKey() {
 }
 
 export default function OrderDetailScreen() {
+  const { session } = useAuth();
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const [order, setOrder] = useState<OrderRecord | null>(null);
@@ -41,6 +45,11 @@ export default function OrderDetailScreen() {
   const [draftPaid, setDraftPaid] = useState(false);
   const [draftPaymentMethod, setDraftPaymentMethod] = useState<PaymentMethod>("cash");
   const [draftPaymentMethodOther, setDraftPaymentMethodOther] = useState("");
+  const [draftDueDate, setDraftDueDate] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
+  const [addingItems, setAddingItems] = useState(false);
   const [paymentMethodChoice, setPaymentMethodChoice] = useState<PaymentMethod>("cash");
   const [paymentMethodOtherChoice, setPaymentMethodOtherChoice] = useState("");
   const [error, setError] = useState("");
@@ -59,6 +68,8 @@ export default function OrderDetailScreen() {
         setDraftPaid(result.paid);
         setDraftPaymentMethod(result.paymentMethod ?? "cash");
         setDraftPaymentMethodOther(result.paymentMethodOther);
+        setDraftDueDate(result.dueDate);
+        setDraftNotes(result.notes);
         setPaymentMethodChoice(result.paymentMethod ?? "cash");
         setPaymentMethodOtherChoice(result.paymentMethodOther);
       }
@@ -79,6 +90,8 @@ export default function OrderDetailScreen() {
     paid?: boolean;
     paymentMethod?: PaymentMethod | null;
     paymentMethodOther?: string | null;
+    dueDate?: string;
+    notes?: string;
   }): Promise<boolean> {
     if (!order) return false;
     setSaving(true);
@@ -96,6 +109,8 @@ export default function OrderDetailScreen() {
           paymentMethod: changes.paymentMethod !== undefined ? changes.paymentMethod : current.paymentMethod,
           paymentMethodOther:
             changes.paymentMethodOther !== undefined ? changes.paymentMethodOther ?? "" : current.paymentMethodOther,
+          dueDate: changes.dueDate ?? current.dueDate,
+          notes: changes.notes ?? current.notes,
           fulfilledDate:
             changes.status === "Fulfilled"
               ? todayKey()
@@ -119,6 +134,8 @@ export default function OrderDetailScreen() {
     setDraftPaid(order.paid);
     setDraftPaymentMethod(order.paymentMethod ?? "cash");
     setDraftPaymentMethodOther(order.paymentMethodOther);
+    setDraftDueDate(order.dueDate);
+    setDraftNotes(order.notes);
     setEditing(true);
     setError("");
   }
@@ -129,6 +146,8 @@ export default function OrderDetailScreen() {
     setDraftPaid(order.paid);
     setDraftPaymentMethod(order.paymentMethod ?? "cash");
     setDraftPaymentMethodOther(order.paymentMethodOther);
+    setDraftDueDate(order.dueDate);
+    setDraftNotes(order.notes);
     setEditing(false);
     setError("");
   }
@@ -140,6 +159,8 @@ export default function OrderDetailScreen() {
       paid?: boolean;
       paymentMethod?: PaymentMethod | null;
       paymentMethodOther?: string | null;
+      dueDate?: string;
+      notes?: string;
     } = {};
     if (draftPaid && draftPaymentMethod === "other" && !draftPaymentMethodOther.trim()) {
       setError("Enter the custom payment method before saving.");
@@ -154,6 +175,12 @@ export default function OrderDetailScreen() {
     if (nextPaymentMethodOther !== (order.paymentMethodOther || null)) {
       changes.paymentMethodOther = nextPaymentMethodOther;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draftDueDate)) {
+      setError("Enter the due date in YYYY-MM-DD format.");
+      return;
+    }
+    if (draftDueDate !== order.dueDate) changes.dueDate = draftDueDate;
+    if (draftNotes !== order.notes) changes.notes = draftNotes;
     if (Object.keys(changes).length === 0) {
       setEditing(false);
       return;
@@ -162,7 +189,7 @@ export default function OrderDetailScreen() {
   }
 
   function advanceStatus() {
-    if (!order) return;
+    if (!order || order.status === "Cancelled") return;
     const nextIndex = orderStatuses.indexOf(order.status) + 1;
     const nextStatus = orderStatuses[nextIndex];
     if (nextStatus) void persist({ status: nextStatus });
@@ -181,6 +208,42 @@ export default function OrderDetailScreen() {
     });
   }
 
+  async function removeOrder() {
+    if (!order) return;
+    setSaving(true);
+    setError("");
+    try {
+      await deleteOrder(order.id);
+      router.back();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete this order.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddItems() {
+    if (!order || !session?.user.id) return;
+    const items = products.flatMap((product) => {
+      const quantity = itemQuantities[product.id] ?? 0;
+      return quantity > 0 ? [{ product, quantity }] : [];
+    });
+    if (!items.length) return;
+    setAddingItems(true);
+    setError("");
+    try {
+      await addItemsToOrder(session.user.id, order.id, items);
+      setItemQuantities({});
+      setProducts(await listProducts());
+      const updated = await getOrder(order.id);
+      if (updated) setOrder(updated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not add items to this order.");
+    } finally {
+      setAddingItems(false);
+    }
+  }
+
   if (loading) {
     return (
       <AppScreen>
@@ -195,21 +258,22 @@ export default function OrderDetailScreen() {
   if (!order) {
     return (
       <AppScreen>
-        <SheetHeader title="Order details" />
+        <SheetHeader showSettings={false} title="Order details" />
         <MessageCard title="Order unavailable" message={error || "This order could not be found."} tone="error" />
       </AppScreen>
     );
   }
 
-  const progressIndex = orderStatuses.indexOf(order.status);
+  const progressIndex = order.status === "Cancelled" ? -1 : orderStatuses.indexOf(order.status);
   const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const selectedPaymentMethod = editing ? draftPaymentMethod : paymentMethodChoice;
   const selectedPaymentMethodOther = editing ? draftPaymentMethodOther : paymentMethodOtherChoice;
+  const canCancelOrder = order.status !== "Cancelled" && !(order.status === "Fulfilled" && order.paid);
 
   return (
     <AppScreen>
-      <SheetHeader title={`Order ${order.number}`} subtitle="Order details and progress." />
+      <SheetHeader showSettings={false} title={`Order ${order.number}`} subtitle="Order details and progress." />
 
       {error ? <MessageCard title="Update failed" message={error} tone="error" /> : null}
 
@@ -244,6 +308,12 @@ export default function OrderDetailScreen() {
         )}
       </View>
 
+      {order.status === "Cancelled" ? (
+        <ContentCard style={styles.cancelledCard}>
+          <Text style={styles.cancelledTitle}>This order is cancelled</Text>
+          <Text style={styles.muted}>It is saved in the Cancelled tab. Edit the status if you need to reopen it.</Text>
+        </ContentCard>
+      ) : null}
       <ContentCard style={styles.summaryCard}>
         <View style={styles.summaryTop}>
           <View>
@@ -303,7 +373,7 @@ export default function OrderDetailScreen() {
               <Text style={styles.currentStatusLabel}>Current</Text>
               <Text style={styles.currentStatus}>{orderStatusLabels[order.status]}</Text>
             </View>
-            {order.status !== orderStatuses[orderStatuses.length - 1] ? (
+            {order.status !== "Cancelled" && order.status !== orderStatuses[orderStatuses.length - 1] ? (
               <View style={styles.nextStatusGroup}>
                 <Text style={styles.statusArrow}>→</Text>
                 <Pressable
@@ -320,6 +390,12 @@ export default function OrderDetailScreen() {
             ) : null}
           </View>
         )}
+        {editing ? (
+          <>
+            <NativeDatePickerField label="Due date" onChange={setDraftDueDate} value={draftDueDate} />
+            <FormField label="Order notes" multiline onChangeText={setDraftNotes} placeholder="Order details" value={draftNotes} />
+          </>
+        ) : null}
         <View style={styles.paymentRow}>
           <View style={styles.paymentCopy}>
             <Text style={styles.sectionTitle}>Payment</Text>
@@ -438,6 +514,50 @@ export default function OrderDetailScreen() {
           <Text style={styles.note}>{order.notes}</Text>
         </ContentCard>
       ) : null}
+      <ContentCard style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>Add items to this order</Text>
+        <Text style={styles.muted}>New requests from {order.customer} stay together under order {order.number}.</Text>
+        {!products.length ? (
+          <Pressable onPress={() => void listProducts().then(setProducts).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load products."))} style={styles.secondaryAction}>
+            <Text style={styles.secondaryActionText}>Load catalog items</Text>
+          </Pressable>
+        ) : products.map((product) => {
+          const quantity = itemQuantities[product.id] ?? 0;
+          return <View key={product.id} style={styles.productRow}>
+            <View style={styles.itemCopy}><Text style={styles.itemName}>{product.name}</Text><Text style={styles.muted}>{formatCurrency(product.price)}</Text></View>
+            <Pressable accessibilityLabel={`Remove one ${product.name}`} disabled={!quantity || addingItems} onPress={() => setItemQuantities((current) => ({ ...current, [product.id]: Math.max((current[product.id] ?? 0) - 1, 0) }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
+            <Text style={styles.quantityText}>{quantity}</Text>
+            <Pressable accessibilityLabel={`Add one ${product.name}`} disabled={addingItems} onPress={() => setItemQuantities((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
+          </View>;
+        })}
+        {products.length ? <Pressable accessibilityRole="button" disabled={addingItems || !Object.values(itemQuantities).some((quantity) => quantity > 0)} onPress={() => void handleAddItems()} style={[styles.primaryAction, (addingItems || !Object.values(itemQuantities).some((quantity) => quantity > 0)) && styles.disabled]}><Text style={styles.primaryActionText}>{addingItems ? "Adding items…" : "Add selected items"}</Text></Pressable> : null}
+      </ContentCard>
+      {canCancelOrder || editing ? (
+        <View style={styles.destructiveActions}>
+          {canCancelOrder ? (
+            <NativeConfirmButton
+              label="Cancel order"
+              title="Cancel this order?"
+              message="The order will move to the Cancelled tab."
+              confirmLabel="Cancel order"
+              tone="cancel"
+              onConfirm={async () => {
+                if (await persist({ status: "Cancelled" })) setEditing(false);
+              }}
+            />
+          ) : null}
+          {editing ? (
+            <NativeConfirmButton
+              label="Delete order"
+              title="Are you sure you want to delete this order?"
+              message="This permanently deletes the order and its saved items."
+              confirmLabel="Delete order"
+              tone="delete"
+              onConfirm={removeOrder}
+            />
+          ) : null}
+        </View>
+      ) : null}
     </AppScreen>
   );
 }
@@ -494,6 +614,9 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: spacing.sm,
   },
+  cancelledCard: { borderColor: colors.brick },
+  cancelledTitle: { color: colors.brick, fontSize: 15, fontWeight: "700" },
+  destructiveActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, flexWrap: "wrap" },
   primaryAction: {
     alignItems: "center",
     justifyContent: "center",
@@ -771,6 +894,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
+  productRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.xs },
+  quantityButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.parchment },
+  quantitySymbol: { color: colors.teal, fontSize: 18, fontWeight: "700" },
+  quantityText: { minWidth: 18, color: colors.espresso, textAlign: "center", fontWeight: "700" },
   grandTotalRow: {
     flexDirection: "row",
     alignItems: "center",

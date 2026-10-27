@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
+import { Avatar } from "@/components/ui/design";
 import { NativeButton } from "@/components/ui/native-button";
 import { NativeConfirmButton } from "@/components/ui/native-confirm-button";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { deleteCustomer, getCustomer, updateCustomer, type CustomerRecord } from "@/lib/workspace";
-import { colors, spacing } from "@/theme/tokens";
+import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 export default function CustomerDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
@@ -93,17 +94,27 @@ export default function CustomerDetailScreen() {
   }
 
   return (
-    <AppScreen>
-      <SheetHeader
-        title={customer?.name || "Customer details"}
-        subtitle="Saved customer information."
-        showSettings={false}
-        rightAction={customer ? <NativeButton label={editing ? "Cancel" : "Edit"} onPress={toggleEditing} variant="text" /> : undefined}
-      />
+    <View style={styles.root}>
+    <AppScreen
+      header={
+        <SheetHeader
+          title="Customer"
+          subtitle="Saved customer information."
+          showSettings={false}
+          rightAction={customer ? <NativeButton label={editing ? "Cancel" : "Edit"} onPress={toggleEditing} variant="text" /> : undefined}
+        />
+      }
+    >
       {error ? <MessageCard title="Customer profile" message={error} tone="error" /> : null}
       {loading ? (
         <View style={styles.loading}><ActivityIndicator color={colors.teal} /><Text style={styles.muted}>Loading customer…</Text></View>
       ) : customer ? (
+        <>
+        <View style={styles.hero}>
+          <Avatar name={customer.name || customer.phone} size={84} />
+          <Text style={styles.heroName}>{customer.name || customer.phone}</Text>
+          <Text style={styles.muted}>Customer since {new Date(customer.createdAt).toLocaleDateString()}</Text>
+        </View>
         <ContentCard style={styles.card}>
           <Text style={styles.sectionTitle}>{editing ? "Edit customer" : "Contact information"}</Text>
           {editing ? (
@@ -125,18 +136,30 @@ export default function CustomerDetailScreen() {
             </>
           ) : (
             <>
-              <DetailField label="Name" value={customer.name || "Not provided"} />
               <DetailField label="Phone" value={customer.phone || "Not provided"} selectable />
+              <DetailField label="Name" value={customer.name || "Not provided"} />
               <DetailField label="Email" value={customer.email || "Not provided"} selectable />
               <DetailField label="Address" value={customer.address || "Not provided"} />
-              <DetailField label="Customer since" value={new Date(customer.createdAt).toLocaleDateString()} />
             </>
           )}
         </ContentCard>
+        </>
       ) : (
         <MessageCard title="Customer unavailable" message={error || "This customer could not be found."} tone="error" />
       )}
     </AppScreen>
+    {customer && !editing ? (
+      <View style={styles.footer}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push({ pathname: "/order/new", params: { customerId: customer.id } })}
+          style={({ pressed }) => [styles.newOrder, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={styles.newOrderText}>New order</Text>
+        </Pressable>
+      </View>
+    ) : null}
+    </View>
   );
 }
 
@@ -150,6 +173,12 @@ function DetailField({ label, value, selectable = false }: { label: string; valu
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.parchment },
+  hero: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.md },
+  heroName: { color: colors.espresso, fontFamily: serifFamily, fontSize: 28, fontWeight: "800", textAlign: "center" },
+  footer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.card, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  newOrder: { minHeight: 52, alignItems: "center", justifyContent: "center", borderRadius: 16, backgroundColor: colors.orange },
+  newOrderText: { color: colors.card, fontSize: 16, fontWeight: "700" },
   loading: { minHeight: 220, alignItems: "center", justifyContent: "center", gap: spacing.md },
   card: { gap: spacing.md, padding: spacing.md },
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },

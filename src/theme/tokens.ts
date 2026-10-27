@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 export const colors = {
   teal: "#174A46",
   deepTeal: "#0F332F",
@@ -32,3 +34,5 @@ export const typography = {
   bodyFontFamily: "Inter",
   displayFontFamily: "Noto Serif",
 } as const;
+
+export const serifFamily = Platform.select({ ios: "Georgia", android: "serif", default: "serif" });

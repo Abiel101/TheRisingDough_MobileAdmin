@@ -11,9 +11,14 @@ export const orderStatusLabels: Record<OrderStatus, string> = {
   Pending: "Pending",
   "In progress": "In progress",
   Ready: "Ready",
-  Fulfilled: "Delivered",
+  Fulfilled: "Completed",
   Cancelled: "Cancelled",
 };
+
+/** Orders that reach Ready with payment received complete automatically. */
+export function resolveStatus(status: OrderStatus, paid: boolean): OrderStatus {
+  return status === "Ready" && paid ? "Fulfilled" : status;
+}
 
 export const paymentMethods = ["cash", "zelle", "other"] as const;
 

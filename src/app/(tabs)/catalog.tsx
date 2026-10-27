@@ -3,8 +3,8 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { NativeButton } from "@/components/ui/native-button";
-import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { Avatar, AddFab, SearchField } from "@/components/ui/design";
+import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listProducts, type ProductRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -43,19 +43,9 @@ export default function CatalogScreen() {
 
   const header = (
     <View style={styles.listHeader}>
-      <ScreenHeader title="Item catalog" subtitle="Browse current products and open an item to see its details." />
-
-      <View style={styles.actionRow}>
-        <Text style={styles.sectionTitle}>Available items</Text>
-        <NativeButton
-          label="Add item"
-          onPress={() => router.push("/catalog/new")}
-        />
-      </View>
-
-      <FormField
+      <ScreenHeader title="Item catalog" subtitle="Browse products and open one for details." />
+      <SearchField
         accessibilityLabel="Search catalog items"
-        label="Search items"
         onChangeText={setSearch}
         placeholder="Search catalog"
         value={search}
@@ -78,13 +68,14 @@ export default function CatalogScreen() {
         keyExtractor={(product) => product.id}
         ListHeaderComponent={header}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => (
           <Pressable
             accessibilityLabel={`View ${item.name} catalog details, ${formatCurrency(item.price)}`}
             accessibilityRole="button"
             onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
             style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
           >
+            <Avatar index={index} name={item.name} />
             <View style={styles.productCopy}>
               <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
               <Text style={styles.productPrice}>{formatCurrency(item.price)}</Text>
@@ -95,6 +86,7 @@ export default function CatalogScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      <AddFab label="Add item" onPress={() => router.push("/catalog/new")} />
     </SafeAreaView>
   );
 }
@@ -102,17 +94,13 @@ export default function CatalogScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   list: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
+  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: 110, gap: spacing.sm },
   listHeader: { gap: spacing.md, marginBottom: spacing.xs },
-  actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   productCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 18,
     backgroundColor: colors.card,
     padding: spacing.md,
   },

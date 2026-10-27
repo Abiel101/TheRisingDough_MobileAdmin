@@ -37,8 +37,7 @@ export default function NewCustomerScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.screen}>
-      <SheetHeader showSettings={false} title="New customer" subtitle="Add contact information for a customer." />
+    <AppScreen contentContainerStyle={styles.screen} header={<SheetHeader showSettings={false} title="New customer" subtitle="Add contact information for a customer." />}>
       {error ? <MessageCard title="Customer form" message={error} tone="error" /> : null}
       <ContentCard style={styles.card}>
         <NativeFormField label="Name (optional)" onChangeText={setName} placeholder="Customer name" value={name} />

@@ -66,8 +66,7 @@ export default function CatalogItemDetailScreen() {
   }
 
   return (
-    <AppScreen>
-      <SheetHeader title={product?.name || "Item details"} subtitle="Catalog item information." />
+    <AppScreen header={<SheetHeader title={product?.name || "Item details"} subtitle="Catalog item information." />}>
       {error ? <MessageCard title="Catalog item" message={error} tone="error" /> : null}
       {loading ? (
         <View style={styles.loading}><ActivityIndicator color={colors.teal} /><Text style={styles.muted}>Loading item…</Text></View>

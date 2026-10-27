@@ -12,6 +12,7 @@ export type CustomerRecord = {
 
 export type ProductRecord = { id: string; name: string; price: number };
 export type OrderLine = {
+  id: string;
   productId: string;
   name: string;
   price: number;
@@ -303,6 +304,7 @@ async function mapOrderRows(
   for (const row of (itemResult.data ?? []) as OrderItemRow[]) {
     const lines = itemsByOrder.get(row.order_id) ?? [];
     lines.push({
+      id: row.id,
       productId: row.catalog_product_id ?? "",
       name: row.item_name,
       price: Number(row.unit_price),
@@ -473,6 +475,16 @@ export async function addItemsToOrder(
     nextItems.set(key, { ...existing, quantity: existing.quantity + input.quantity });
   }
   if (newItems.length) await insertOrderItems(ownerId, orderId, newItems);
+}
+
+export async function removeOrderItems(orderId: string, itemIds: string[]): Promise<void> {
+  if (!itemIds.length) return;
+  const { error } = await supabase
+    .from("admin_order_items")
+    .delete()
+    .eq("order_id", orderId)
+    .in("id", itemIds);
+  throwIfError(error);
 }
 
 export async function deleteOrder(id: string): Promise<void> {

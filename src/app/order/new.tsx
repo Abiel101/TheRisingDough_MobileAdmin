@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { useAuth } from "@/auth/auth-context";
 import { NativeButton } from "@/components/ui/native-button";
+import { SearchField } from "@/components/ui/design";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { addCustomer, createOrder, listCustomers, listProducts, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
-import { colors, spacing } from "@/theme/tokens";
+import { colors, serifFamily, spacing } from "@/theme/tokens";
+
+function formatCurrency(value: number) {
+  return `$${value.toFixed(2)}`;
+}
 
 function localTodayKey() {
   const today = new Date();
@@ -18,10 +23,11 @@ function localTodayKey() {
 
 export default function NewOrderScreen() {
   const { session } = useAuth();
+  const { customerId: presetCustomerId } = useLocalSearchParams<{ customerId?: string }>();
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [customerQuery, setCustomerQuery] = useState("");
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState(presetCustomerId ?? "");
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
@@ -49,7 +55,8 @@ export default function NewOrderScreen() {
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
 
-  const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
+  const activeCustomerId = selectedCustomerId;
+  const selectedCustomer = customers.find((customer) => customer.id === activeCustomerId);
   const query = customerQuery.trim().toLocaleLowerCase();
   const matches = useMemo(() => query.length < 1 ? [] : customers.filter((customer) =>
     [customer.name, customer.phone, customer.email].some((value) => value.toLocaleLowerCase().includes(query)),
@@ -58,6 +65,9 @@ export default function NewOrderScreen() {
     const quantity = quantities[product.id] ?? 0;
     return quantity > 0 ? [{ product, quantity }] : [];
   });
+
+  const total = selectedItems.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
+  const canCreate = !saving && !!selectedCustomer && selectedItems.length > 0;
 
   async function saveCustomer() {
     if (!session?.user.id) return;
@@ -104,8 +114,8 @@ export default function NewOrderScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
-      <SheetHeader showSettings={false} title="New order" subtitle="Choose a customer, due date, and items." />
+    <View style={styles.root}>
+    <AppScreen contentContainerStyle={styles.screen} header={<SheetHeader showSettings={false} title="New order" subtitle="Choose a customer, due date, and items." />} keyboardShouldPersistTaps="handled">
       {error ? <MessageCard title="Order form" message={error} tone="error" /> : null}
       <ContentCard style={styles.card}>
         <Text style={styles.sectionTitle}>Customer</Text>
@@ -119,7 +129,7 @@ export default function NewOrderScreen() {
           </View>
         ) : (
           <>
-            <NativeFormField autoCapitalize="none" label="Search customers" onChangeText={setCustomerQuery} placeholder="Type a name, phone, or email" value={customerQuery} />
+            <SearchField accessibilityLabel="Search customers" onChangeText={setCustomerQuery} placeholder="Search customers" value={customerQuery} />
             {query.length >= 1 ? matches.map((customer) => (
               <Pressable key={customer.id} onPress={() => { setSelectedCustomerId(customer.id); setCustomerQuery(""); }} style={styles.customerResult}>
                 <Text style={styles.customerName}>{customer.name || customer.phone}</Text>
@@ -163,15 +173,36 @@ export default function NewOrderScreen() {
           );
         })}
         <NativeFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
-        <NativeButton disabled={saving || !selectedCustomer || !selectedItems.length} label={saving ? "Creating order…" : "Create order"} onPress={() => void saveOrder()} />
       </ContentCard>
     </AppScreen>
+    <View style={styles.footer}>
+      <View>
+        <Text style={styles.totalLabel}>Total</Text>
+        <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canCreate}
+        onPress={() => void saveOrder()}
+        style={({ pressed }) => [styles.createButton, !canCreate && styles.createDisabled, pressed && { opacity: 0.85 }]}
+      >
+        <Text style={styles.createText}>{saving ? "Creating…" : "Create order"}</Text>
+      </Pressable>
+    </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  root: { flex: 1, backgroundColor: colors.parchment },
+  screen: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl, gap: spacing.md },
   card: { gap: spacing.md },
+  footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.card, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  totalLabel: { color: colors.mutedText, fontSize: 12, fontWeight: "600" },
+  totalValue: { color: colors.espresso, fontFamily: serifFamily, fontSize: 26, fontWeight: "800" },
+  createButton: { minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 16, backgroundColor: colors.orange, paddingHorizontal: spacing.xl },
+  createDisabled: { opacity: 0.45 },
+  createText: { color: colors.card, fontSize: 16, fontWeight: "700" },
   sectionTitle: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
   selectedCustomer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderWidth: 1, borderColor: colors.teal, borderRadius: 12, backgroundColor: colors.parchment, padding: spacing.md },
   customerCopy: { flex: 1, gap: 3 },

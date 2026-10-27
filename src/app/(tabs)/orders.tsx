@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { OrderCard } from "@/components/order-card";
-import { NativeButton } from "@/components/ui/native-button";
-import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { AddFab, SearchField } from "@/components/ui/design";
+import { NativeSegmentedControl } from "@/components/ui/native-segmented-control";
+import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listOrders, type OrderRecord } from "@/lib/workspace";
 import type { OrderStatus } from "@/domain/orders";
 import { colors, spacing } from "@/theme/tokens";
@@ -73,22 +74,16 @@ export default function OrdersScreen() {
   const header = (
     <View style={styles.listHeader}>
       <ScreenHeader title="Orders" subtitle="A clear view of every order in the queue." />
-      <View style={styles.actionRow}>
-        <Text style={styles.sectionTitle}>{orderView} orders</Text>
-        <NativeButton label="Add order" onPress={() => router.push("/order/new")} />
-      </View>
-      <View style={styles.viewSwitch}>
-        {(["Active", "Completed", "Cancelled"] as const).map((view) => (
-          <Pressable key={view} onPress={() => setOrderView(view)} style={[styles.viewButton, orderView === view && styles.viewButtonActive]}>
-            <Text style={[styles.viewButtonText, orderView === view && styles.viewButtonTextActive]}>
-              {view} ({orders.filter((order) => belongsInView(order, view)).length})
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <FormField
+      <NativeSegmentedControl
+        onChange={setOrderView}
+        options={(["Active", "Completed", "Cancelled"] as const).map((view) => ({
+          value: view,
+          label: `${view} (${orders.filter((order) => belongsInView(order, view)).length})`,
+        }))}
+        value={orderView}
+      />
+      <SearchField
         accessibilityLabel="Search orders or customers"
-        label="Search"
         onChangeText={setSearch}
         placeholder="Order number or customer"
         value={search}
@@ -117,6 +112,7 @@ export default function OrdersScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      <AddFab label="Add order" onPress={() => router.push("/order/new")} />
     </SafeAreaView>
   );
 }
@@ -131,7 +127,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingBottom: 110,
     gap: spacing.md,
   },
   listHeader: {

@@ -34,8 +34,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <AppScreen>
-      <SheetHeader showSettings={false} title="Settings" subtitle="Your account and session." />
+    <AppScreen header={<SheetHeader showSettings={false} title="Settings" subtitle="Your account and session." />}>
       {error ? <MessageCard title="Sign out failed" message={error} tone="error" /> : null}
       <ContentCard style={styles.profileCard}>
         <Text style={styles.sectionTitle}>Account information</Text>

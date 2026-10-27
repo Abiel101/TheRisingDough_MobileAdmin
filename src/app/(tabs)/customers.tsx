@@ -3,8 +3,8 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { NativeButton } from "@/components/ui/native-button";
-import { FormField, MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+import { Avatar, AddFab, SearchField } from "@/components/ui/design";
+import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listCustomers, type CustomerRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -42,18 +42,8 @@ export default function CustomersScreen() {
   const header = (
     <View style={styles.listHeader}>
       <ScreenHeader title="Customers" subtitle="Browse customer records and open one for contact details." />
-
-      <View style={styles.actionRow}>
-        <Text style={styles.sectionTitle}>Customer list</Text>
-        <NativeButton
-          label="Add customer"
-          onPress={() => { setError(""); router.push("/customer/new"); }}
-        />
-      </View>
-
-      <FormField
+      <SearchField
         accessibilityLabel="Search saved customers"
-        label="Search customers"
         onChangeText={setSearch}
         placeholder="Name, phone, or email"
         value={search}
@@ -76,13 +66,14 @@ export default function CustomersScreen() {
         keyExtractor={(customer) => customer.id}
         ListHeaderComponent={header}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => (
           <Pressable
             accessibilityLabel={`View details for ${item.name || item.phone}`}
             accessibilityRole="button"
             onPress={() => router.push({ pathname: "/customer/[id]", params: { id: item.id } })}
             style={({ pressed }) => [styles.customerCard, pressed && styles.pressed]}
           >
+            <Avatar index={index} name={item.name || item.phone} />
             <View style={styles.customerCopy}>
               <Text numberOfLines={2} style={styles.customerName}>{item.name || "Customer"}</Text>
               <Text numberOfLines={1} style={styles.customerDetail}>{item.phone}</Text>
@@ -94,6 +85,7 @@ export default function CustomersScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      <AddFab label="Add customer" onPress={() => { setError(""); router.push("/customer/new"); }} />
     </SafeAreaView>
   );
 }
@@ -101,17 +93,13 @@ export default function CustomersScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   list: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
+  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: 110, gap: spacing.sm },
   listHeader: { gap: spacing.md, marginBottom: spacing.xs },
-  actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   customerCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 18,
     backgroundColor: colors.card,
     padding: spacing.md,
   },

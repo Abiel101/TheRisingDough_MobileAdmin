@@ -37,8 +37,7 @@ export default function NewCatalogItemScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.screen}>
-      <SheetHeader showSettings={false} title="New catalog item" subtitle="Add a product and its unit price." />
+    <AppScreen contentContainerStyle={styles.screen} header={<SheetHeader showSettings={false} title="New catalog item" subtitle="Add a product and its unit price." />}>
       {error ? <MessageCard title="Catalog item" message={error} tone="error" /> : null}
       <ContentCard style={styles.card}>
         <NativeFormField label="Item name" onChangeText={setName} placeholder="e.g. Sourdough loaf" value={name} />

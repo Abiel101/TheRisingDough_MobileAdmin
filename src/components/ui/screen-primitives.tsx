@@ -14,12 +14,19 @@ import type { ReactNode } from "react";
 import { router } from "expo-router";
 import { SafeAreaView, type SafeAreaViewProps } from "react-native-safe-area-context";
 
+import { NativeIcon } from "@/components/ui/native-icon";
 import { NativeText } from "@/components/ui/native-text";
-import { colors, spacing } from "@/theme/tokens";
+import { colors, serifFamily, spacing } from "@/theme/tokens";
 
-export function AppScreen({ children, safeAreaEdges, ...scrollProps }: ScrollViewProps & { safeAreaEdges?: SafeAreaViewProps["edges"] }) {
+export function AppScreen({
+  children,
+  header,
+  safeAreaEdges,
+  ...scrollProps
+}: ScrollViewProps & { header?: ReactNode; safeAreaEdges?: SafeAreaViewProps["edges"] }) {
   return (
     <SafeAreaView edges={safeAreaEdges} style={styles.safeArea}>
+      {header ? <View style={styles.fixedHeader}>{header}</View> : null}
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -41,13 +48,11 @@ export function ScreenHeader({
   return (
     <View style={styles.header}>
       <View style={styles.headerTop}>
-        <View style={styles.headerCopy}>
-          <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
-          <NativeText textStyle={styles.title}>{title}</NativeText>
-          <NativeText textStyle={styles.subtitle}>{subtitle}</NativeText>
-        </View>
+        <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
         <SettingsButton />
       </View>
+      <NativeText textStyle={styles.title}>{title}</NativeText>
+      <NativeText textStyle={styles.subtitle}>{subtitle}</NativeText>
     </View>
   );
 }
@@ -89,10 +94,11 @@ export function SheetHeader({
         <Pressable
           accessibilityLabel="Close"
           accessibilityRole="button"
+          hitSlop={8}
           onPress={() => router.back()}
           style={styles.closeButton}
         >
-          <Text style={styles.settingsButtonText}>Close</Text>
+          <NativeIcon color={colors.teal} name="close" size={16} />
         </Pressable>
       </View>
     </View>
@@ -169,9 +175,10 @@ export const styles = StyleSheet.create({
   },
   headerTop: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   headerCopy: {
     flex: 1,
@@ -211,11 +218,23 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.xs,
   },
+  fixedHeader: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   closeButton: {
-    borderRadius: 999,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
     backgroundColor: colors.parchment,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  },
+  closeGlyph: {
+    color: colors.teal,
+    fontSize: 16,
+    fontWeight: "700",
   },
   sheetTitle: {
     color: colors.espresso,
@@ -241,9 +260,10 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.espresso,
-    fontSize: 30,
-    fontWeight: "700",
-    lineHeight: 37,
+    fontFamily: serifFamily,
+    fontSize: 34,
+    fontWeight: "800",
+    lineHeight: 40,
   },
   subtitle: {
     color: colors.mutedText,
@@ -253,7 +273,7 @@ export const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.card,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
     gap: spacing.md,
     padding: spacing.lg,

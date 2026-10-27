@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   input: {
-    width: "100%",
+    width: "100%" as const,
     height: 48,
     backgroundColor: "transparent",
     paddingHorizontal: spacing.md,

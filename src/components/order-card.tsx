@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 
-import { calculateOrderTotal, orderStatuses, orderStatusLabels, type OrderStatus } from "@/domain/orders";
+import { calculateOrderTotal, orderStatuses, orderStatusLabels, resolveStatus, type OrderStatus } from "@/domain/orders";
 import { updateOrder, type OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -22,15 +22,19 @@ export function OrderCard({
   const [statusError, setStatusError] = useState("");
   const status = order.status;
 
-  const nextStatus = status === "Cancelled" ? undefined : orderStatuses[orderStatuses.indexOf(status) + 1];
+  const nextStatus =
+    status === "Cancelled" || status === "Ready" || status === "Fulfilled"
+      ? undefined
+      : orderStatuses[orderStatuses.indexOf(status) + 1];
 
   async function advanceStatus(closeSwipe: () => void) {
     if (!nextStatus || updatingStatus) return;
     setUpdatingStatus(true);
     setStatusError("");
     try {
-      await updateOrder(order.id, { status: nextStatus });
-      onStatusUpdated(order.id, nextStatus);
+      const resolved = resolveStatus(nextStatus, order.paymentTrackingAvailable ? order.paid : true);
+      await updateOrder(order.id, { status: resolved });
+      onStatusUpdated(order.id, resolved);
       closeSwipe();
     } catch (cause) {
       setStatusError(cause instanceof Error ? cause.message : "Could not update this order.");
@@ -114,16 +118,25 @@ export function OrderCard({
   );
 }
 
+const pillTones: Record<OrderRecord["status"], { background: string; color: string }> = {
+  Pending: { background: "#F3E3B3", color: "#6B4E0A" },
+  "In progress": { background: "#D9E8F5", color: "#1F4E79" },
+  Ready: { background: "#DCE8D2", color: "#3E5A2C" },
+  Fulfilled: { background: "#D3E5E1", color: colors.teal },
+  Cancelled: { background: "#F2D9D2", color: colors.brick },
+};
+
 export function StatusPill({ status, paid }: { status: OrderRecord["status"]; paid?: boolean }) {
-  const color = status === "Cancelled" ? colors.brick : status === "Ready" || status === "Fulfilled" ? colors.sage : colors.teal;
-  const background = status === "Pending" ? colors.cream : colors.parchment;
+  const tone = pillTones[status];
   return (
-    <View style={[styles.pill, { backgroundColor: background }]}>
-      <Text style={[styles.pillText, { color }]}>{orderStatusLabels[status]}</Text>
+    <View style={styles.pillGroup}>
+      <View style={[styles.pill, { backgroundColor: tone.background }]}>
+        <Text style={[styles.pillText, { color: tone.color }]}>{orderStatusLabels[status]}</Text>
+      </View>
       {paid !== undefined ? (
-        <Text style={[styles.pillText, { color: paid ? colors.sage : colors.brick }]}>
-          {paid ? "Paid" : "Unpaid"}
-        </Text>
+        <View style={[styles.pill, { backgroundColor: paid ? "#DCE8D2" : "#F8DCD5" }]}>
+          <Text style={[styles.pillText, { color: paid ? "#3E5A2C" : colors.brick }]}>{paid ? "Paid" : "Unpaid"}</Text>
+        </View>
       ) : null}
     </View>
   );
@@ -137,19 +150,17 @@ export function formatDate(date: string) {
 
 const styles = StyleSheet.create({
   swipeContainer: {
-    borderRadius: 16,
+    borderRadius: 22,
   },
   card: {
     backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderRadius: 22,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
   },
   pressed: {
-    opacity: 0.78,
+    backgroundColor: "#F0ECE3",
   },
   disabled: {
     opacity: 0.7,
@@ -189,13 +200,13 @@ const styles = StyleSheet.create({
   orderNumber: {
     flex: 1,
     color: colors.espresso,
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 17,
+    fontWeight: "800",
   },
   total: {
     color: colors.espresso,
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 17,
+    fontWeight: "800",
   },
   metaRow: {
     flexDirection: "row",
@@ -206,18 +217,20 @@ const styles = StyleSheet.create({
   customer: {
     flex: 1,
     color: colors.mutedText,
-    fontSize: 13,
+    fontSize: 15,
   },
-  pill: {
+  pillGroup: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.sm,
+  },
+  pill: {
     borderRadius: 999,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   pillText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "700",
   },
   items: {
@@ -225,7 +238,8 @@ const styles = StyleSheet.create({
   },
   itemText: {
     color: colors.espresso,
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: "600",
   },
   moreItems: {
     color: colors.mutedText,

@@ -26,6 +26,7 @@ import {
   type PaymentMethod,
 } from "@/domain/orders";
 import { formatDate } from "@/components/order-card";
+import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeIcon } from "@/components/ui/native-icon";
 import { FormField, MessageCard } from "@/components/ui/screen-primitives";
 import {
@@ -261,7 +262,8 @@ export default function OrderDetailScreen() {
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const paymentTracked = order.paymentTrackingAvailable;
   const canAddItems = !cancelled && !completed && daysUntil(order.dueDate) >= ADD_ITEMS_CUTOFF_DAYS;
-  const canRemoveItems = order.status === "Pending" && order.items.length > 1;
+  const canChangeDate = canAddItems;
+  const canRemoveItems = canAddItems && order.status === "Pending" && order.items.length > 1;
   const hasSelection = Object.values(itemQuantities).some((quantity) => quantity > 0);
   const otherMethodMissing = paymentMethodChoice === "other" && !paymentMethodOtherChoice.trim();
   const statusColor = cancelled ? colors.brick : statusColors[order.status as keyof typeof statusColors];
@@ -275,6 +277,15 @@ export default function OrderDetailScreen() {
   const payDisabled = saving || otherMethodMissing;
   const firstName = order.customer.trim().split(/\s+/)[0] || "Customer";
   const initial = (order.customer.trim()[0] ?? "?").toUpperCase();
+
+  function changeDueDate(dateKey: string) {
+    if (!order || dateKey === order.dueDate) return;
+    if (daysUntil(dateKey) < 0) {
+      setError("Choose a due date that is today or later.");
+      return;
+    }
+    void changeOrder({ dueDate: dateKey });
+  }
 
   function advance() {
     if (!advanceTarget || !order) return;
@@ -357,6 +368,16 @@ export default function OrderDetailScreen() {
           </View>
           {cancelled ? <Text style={styles.cancelledBanner}>This order was cancelled</Text> : null}
         </View>
+
+        {canChangeDate ? (
+          <View style={styles.card}>
+            <NativeDatePickerField label="Change due date" onChange={changeDueDate} value={order.dueDate} />
+          </View>
+        ) : !cancelled && !completed ? (
+          <Text style={styles.muted}>
+            Orders can only be changed up to {ADD_ITEMS_CUTOFF_DAYS} days before they are due. Cancel or delete this order instead.
+          </Text>
+        ) : null}
 
         <View style={styles.card}>
           <View style={styles.customerRow}>

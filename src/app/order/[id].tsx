@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -18,15 +19,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "@/auth/auth-context";
 import {
+  calculateOrderTotals,
   orderStatuses,
   orderStatusLabels,
   paymentMethods,
   resolveStatus,
+  type DiscountType,
   type OrderStatus,
   type PaymentMethod,
 } from "@/domain/orders";
 import { formatDate } from "@/components/order-card";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
+import { printInvoice, shareInvoicePdf } from "@/lib/invoice";
 import { NativeIcon } from "@/components/ui/native-icon";
 import { FormField, MessageCard } from "@/components/ui/screen-primitives";
 import {
@@ -51,6 +55,8 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   zelle: "Zelle",
   other: "Other",
 };
+
+const approvalBaseUrl = (process.env.EXPO_PUBLIC_APPROVAL_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
 const statusColors = {
   Pending: colors.mustard,
@@ -107,6 +113,9 @@ export default function OrderDetailScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const [paymentMethodChoice, setPaymentMethodChoice] = useState<PaymentMethod>("cash");
   const [paymentMethodOtherChoice, setPaymentMethodOtherChoice] = useState("");
+  const [discountType, setDiscountType] = useState<DiscountType>("percent");
+  const [discountInput, setDiscountInput] = useState("");
+  const [notice, setNotice] = useState("");
   const [menuMode, setMenuMode] = useState<MenuMode>("closed");
   const [cancelReason, setCancelReason] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
@@ -125,6 +134,8 @@ export default function OrderDetailScreen() {
       if (result) {
         setPaymentMethodChoice(result.paymentMethod ?? "cash");
         setPaymentMethodOtherChoice(result.paymentMethodOther);
+        setDiscountType(result.discount?.type ?? "percent");
+        setDiscountInput(result.discount ? String(result.discount.value) : "");
       }
       setError(result ? "" : "This order could not be found.");
     } catch (cause) {
@@ -197,7 +208,10 @@ export default function OrderDetailScreen() {
     });
     if (!items.length) return;
     const ownerId = session.user.id;
-    if (await run(() => addItemsToOrder(ownerId, order.id, items))) {
+    if (await run(async () => {
+      await addItemsToOrder(ownerId, order.id, items);
+      await resetApproval();
+    })) {
       setItemQuantities({});
       setAddOpen(false);
     }
@@ -205,7 +219,83 @@ export default function OrderDetailScreen() {
 
   function removeItem(itemId: string) {
     if (!order) return;
-    void run(() => removeOrderItems(order.id, [itemId]));
+    void run(async () => {
+      await removeOrderItems(order.id, [itemId]);
+      await resetApproval();
+    });
+  }
+
+  // Changing what the customer agreed to requires a fresh approval.
+  async function resetApproval() {
+    if (order?.approvalStatus === "approved") await updateOrder(order.id, { approvalStatus: "pending" });
+  }
+
+  function applyDiscount() {
+    if (!order) return;
+    const value = Number(discountInput.replace(/[^0-9.]/g, ""));
+    if (!discountInput.trim() || !Number.isFinite(value) || value <= 0) {
+      setError("Enter a discount greater than zero, or remove the discount.");
+      return;
+    }
+    if (discountType === "percent" && value > 100) {
+      setError("A percentage discount can’t be more than 100%.");
+      return;
+    }
+    if (discountType === "amount" && value > subtotal) {
+      setError("A discount can’t be more than the order subtotal.");
+      return;
+    }
+    const rounded = Math.round(value * 100) / 100;
+    void changeOrder({
+      discount: { type: discountType, value: rounded },
+      ...(order.approvalStatus === "approved" ? { approvalStatus: "pending" as const } : {}),
+    });
+  }
+
+  function removeDiscount() {
+    if (!order) return;
+    setDiscountInput("");
+    void changeOrder({
+      discount: null,
+      ...(order.approvalStatus === "approved" ? { approvalStatus: "pending" as const } : {}),
+    });
+  }
+
+  async function sendApprovalLink() {
+    if (!order) return;
+    if (!approvalBaseUrl) {
+      setError("Set EXPO_PUBLIC_APPROVAL_BASE_URL to the hosted web address of this app to send approval links.");
+      return;
+    }
+    const link = `${approvalBaseUrl}/approve/${order.approvalToken}`;
+    const ok =
+      order.approvalStatus === "approved" || order.approvalStatus === "pending"
+        ? true
+        : await changeOrder({ approvalStatus: "pending" });
+    if (!ok) return;
+    const message = `Hi ${firstName}, please review and approve your order ${order.number} (${formatCurrency(total)}): ${link}`;
+    try {
+      if (Platform.OS === "web" && !navigator.share) {
+        await navigator.clipboard.writeText(message);
+        setNotice("Approval message copied to the clipboard.");
+      } else if (Platform.OS === "web") {
+        await navigator.share({ text: message });
+      } else {
+        await Share.share({ message });
+      }
+    } catch {
+      // Dismissing the share sheet is not an error.
+    }
+  }
+
+  async function invoiceAction(action: (order: OrderRecord) => Promise<void>) {
+    if (!order) return;
+    setError("");
+    try {
+      await action(order);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the invoice.");
+    }
   }
 
   function closeMenu() {
@@ -258,7 +348,17 @@ export default function OrderDetailScreen() {
   const cancelled = order.status === "Cancelled";
   const completed = order.status === "Fulfilled";
   const progressIndex = order.status === "Cancelled" ? -1 : orderStatuses.indexOf(order.status);
-  const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const { subtotal, discountAmount, total } = calculateOrderTotals(
+    order.items.map((item) => ({
+      productId: item.productId,
+      productName: item.name,
+      unitPrice: item.price,
+      quantity: item.quantity,
+    })),
+    order.discount,
+  );
+  const approved = order.approvalStatus === "approved";
+  const canEditDiscount = !cancelled && !completed;
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const paymentTracked = order.paymentTrackingAvailable;
   const canAddItems = !cancelled && !completed && daysUntil(order.dueDate) >= ADD_ITEMS_CUTOFF_DAYS;
@@ -337,10 +437,18 @@ export default function OrderDetailScreen() {
               </Text>
             </View>
           ) : null}
+          {order.approvalAvailable && order.approvalStatus !== "draft" ? (
+            <View style={[styles.pill, { backgroundColor: approved ? `${colors.sage}26` : `${colors.mustard}33` }]}>
+              <Text style={[styles.pillText, { color: approved ? colors.sage : colors.bronze }]}>
+                {approved ? "Approved" : "Awaiting approval"}
+              </Text>
+            </View>
+          ) : null}
           <Text style={styles.orderNumber}>{order.number}</Text>
         </View>
 
         {error ? <MessageCard title="Update failed" message={error} tone="error" /> : null}
+        {notice ? <MessageCard title="Done" message={notice} /> : null}
 
         <View style={styles.dueCard}>
           <View style={styles.dueTop}>
@@ -351,6 +459,7 @@ export default function OrderDetailScreen() {
             <View style={styles.totalBlock}>
               <Text style={styles.dueLabel}>TOTAL</Text>
               <Text style={styles.dueValue}>{formatCurrency(total)}</Text>
+              {discountAmount > 0 ? <Text style={styles.muted}>{formatCurrency(discountAmount)} off</Text> : null}
             </View>
           </View>
           <View style={styles.segmentRow}>
@@ -435,6 +544,101 @@ export default function OrderDetailScreen() {
               ) : null}
             </View>
           )) : <Text style={styles.muted}>No item details were saved with this order.</Text>}
+        </View>
+
+        {order.approvalAvailable ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Discount</Text>
+            {discountAmount > 0 ? (
+              <>
+                <InfoRow label="Subtotal" value={formatCurrency(subtotal)} />
+                <InfoRow
+                  label={order.discount?.type === "percent" ? `Discount (${order.discount.value}%)` : "Discount"}
+                  value={`−${formatCurrency(discountAmount)}`}
+                  strong
+                />
+              </>
+            ) : null}
+            {canEditDiscount ? (
+              <>
+                <View style={styles.chipRow}>
+                  {(["percent", "amount"] as const).map((type) => {
+                    const selected = discountType === type;
+                    return (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ selected, disabled: saving }}
+                        disabled={saving}
+                        key={type}
+                        onPress={() => setDiscountType(type)}
+                        style={[styles.chip, selected && styles.chipSelected]}
+                      >
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                          {type === "percent" ? "Percent (%)" : "Amount ($)"}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <FormField
+                  editable={!saving}
+                  keyboardType="decimal-pad"
+                  label={discountType === "percent" ? "Discount percent" : "Discount amount"}
+                  onChangeText={setDiscountInput}
+                  placeholder={discountType === "percent" ? "10" : "5.00"}
+                  value={discountInput}
+                />
+                <View style={styles.menuActions}>
+                  {order.discount ? (
+                    <Pressable accessibilityRole="button" disabled={saving} onPress={removeDiscount} style={[styles.outlineAction, saving && styles.disabled]}>
+                      <Text style={styles.outlineActionText}>Remove</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable accessibilityRole="button" disabled={saving} onPress={applyDiscount} style={[styles.solidAction, styles.footerFlex, saving && styles.disabled]}>
+                    <Text style={styles.solidActionText}>{saving ? "Saving…" : "Apply discount"}</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.muted}>Discounts can’t be changed on cancelled or completed orders.</Text>
+            )}
+          </View>
+        ) : null}
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Invoice & approval</Text>
+          <View style={styles.menuActions}>
+            <Pressable accessibilityRole="button" onPress={() => void invoiceAction(printInvoice)} style={[styles.outlineAction, styles.footerFlex]}>
+              <Text style={styles.outlineActionText}>Print invoice</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => void invoiceAction(shareInvoicePdf)} style={[styles.outlineAction, styles.footerFlex]}>
+              <Text style={styles.outlineActionText}>Share PDF</Text>
+            </Pressable>
+          </View>
+          {order.approvalAvailable && !cancelled ? (
+            <>
+              {approved ? (
+                <InfoRow
+                  label="Approved"
+                  value={`${formatCurrency(order.approvedTotal ?? total)}${order.approvedByName ? ` by ${order.approvedByName}` : ""}${order.approvedAt ? ` on ${new Date(order.approvedAt).toLocaleDateString()}` : ""}`}
+                  strong
+                />
+              ) : (
+                <Text style={styles.hint}>
+                  {order.approvalStatus === "pending"
+                    ? "Waiting for the customer to approve. You’ll get a notification when they do."
+                    : "Send the customer a link to review and approve this order and its amount."}
+                </Text>
+              )}
+              {!approved ? (
+                <Pressable accessibilityRole="button" disabled={saving} onPress={() => void sendApprovalLink()} style={[styles.solidAction, saving && styles.disabled]}>
+                  <Text style={styles.solidActionText}>
+                    {order.approvalStatus === "pending" ? "Resend approval link" : "Send approval link"}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null}
         </View>
 
         {paymentTracked ? (

@@ -1,11 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import { Animated, Easing, Platform, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider, useAuth } from "@/auth/auth-context";
 import { LoadingSplash } from "@/components/loading-splash";
+import {
+  Notifications,
+  orderIdFromNotification,
+  registerForApprovalNotifications,
+} from "@/lib/notifications";
 import { colors } from "@/theme/tokens";
 
 const SPLASH_DURATION_MS = 1000;
@@ -63,6 +68,21 @@ function RootNavigator() {
     [],
   );
 
+  const ownerId = session?.user.id;
+  useEffect(() => {
+    if (!ownerId) return;
+    registerForApprovalNotifications(ownerId).catch(() => undefined);
+    const openOrder = (response: Parameters<typeof orderIdFromNotification>[0]) => {
+      const orderId = orderIdFromNotification(response);
+      if (orderId) router.push({ pathname: "/order/[id]", params: { id: orderId } });
+    };
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) openOrder(response);
+    });
+    const subscription = Notifications.addNotificationResponseReceivedListener(openOrder);
+    return () => subscription.remove();
+  }, [ownerId]);
+
   const splashVisible = isLoading || !startupDelayElapsed || showSignInSplash;
 
   useLayoutEffect(() => {
@@ -103,6 +123,7 @@ function RootNavigator() {
           <Stack.Protected guard={!session}>
             <Stack.Screen name="index" />
           </Stack.Protected>
+          <Stack.Screen name="approve/[token]" />
         </Stack>
       </View>
       <Animated.View pointerEvents="none" style={[styles.splash, { opacity: splashOpacity }]}>

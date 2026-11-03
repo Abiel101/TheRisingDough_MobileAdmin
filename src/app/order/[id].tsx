@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   PanResponder,
@@ -584,6 +585,7 @@ export default function OrderDetailScreen() {
       ) : null}
 
       <Modal animationType="fade" onRequestClose={closeMenu} transparent visible={menuMode !== "closed"}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboardAvoider}>
         <Pressable onPress={closeMenu} style={styles.backdrop}>
           <Pressable onPress={() => undefined} style={styles.menuSheet}>
             {menuMode === "menu" ? (
@@ -661,6 +663,7 @@ export default function OrderDetailScreen() {
             ) : null}
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -762,6 +765,7 @@ const styles = StyleSheet.create({
   solidAction: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.teal },
   solidActionText: { color: colors.card, fontSize: 14, fontWeight: "700" },
   destructiveAction: { minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.brick, paddingHorizontal: spacing.md },
+  keyboardAvoider: { flex: 1 },
   backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "#0007" },
   menuSheet: { gap: spacing.md, borderTopLeftRadius: 22, borderTopRightRadius: 22, backgroundColor: colors.card, padding: spacing.lg, paddingBottom: spacing.xl },
   menuTitle: { color: colors.espresso, fontSize: 17, fontWeight: "700" },

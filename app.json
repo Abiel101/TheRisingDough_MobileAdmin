@@ -23,7 +23,7 @@
       "package": "com.forgepointlab.therisingdoughadminmobile"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
@@ -49,6 +49,12 @@
         "projectId": "047a663c-db4f-4cc1-9a03-daa2b5ba2ce8"
       }
     },
-    "owner": "forgepointlab"
+    "owner": "forgepointlab",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/047a663c-db4f-4cc1-9a03-daa2b5ba2ce8"
+    }
   }
 }

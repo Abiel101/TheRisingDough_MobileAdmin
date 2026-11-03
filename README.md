@@ -33,3 +33,9 @@ Native sessions are stored with Expo SecureStore. The app reads the existing `ad
 npx expo lint
 npx tsc --noEmit
 ```
+
+## Discounts, invoices and customer approval
+
+1. Apply `supabase/migrations/20261103000000_add_discount_and_approval.sql` to your Supabase project.
+2. Host the web build (`npx expo export -p web`, e.g. with EAS Hosting) and set `EXPO_PUBLIC_APPROVAL_BASE_URL` to its URL. Approval links look like `<base>/approve/<token>` and work without signing in.
+3. Push notifications need a development/production build on a physical device (not Expo Go); Android also needs FCM credentials configured in EAS.

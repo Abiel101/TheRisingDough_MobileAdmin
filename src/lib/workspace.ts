@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { OrderStatus, PaymentMethod } from "@/domain/orders";
+import type { ApprovalStatus, Discount, DiscountType, OrderStatus, PaymentMethod } from "@/domain/orders";
 
 export type CustomerRecord = {
   id: string;
@@ -34,6 +34,13 @@ export type OrderRecord = {
   paymentMethod: PaymentMethod | null;
   paymentMethodOther: string;
   paymentTrackingAvailable: boolean;
+  approvalAvailable: boolean;
+  discount: Discount;
+  approvalToken: string;
+  approvalStatus: ApprovalStatus;
+  approvedAt: string;
+  approvedByName: string;
+  approvedTotal: number | null;
   notes: string;
   items: OrderLine[];
   createdAt: string;
@@ -59,6 +66,13 @@ type OrderRow = {
   paid?: boolean;
   payment_method?: PaymentMethod | null;
   payment_method_other?: string | null;
+  discount_type?: DiscountType | null;
+  discount_value?: number | string | null;
+  approval_token?: string;
+  approval_status?: ApprovalStatus;
+  approved_at?: string | null;
+  approved_by_name?: string | null;
+  approved_total?: number | string | null;
   notes: string;
   created_at: string;
 };
@@ -218,63 +232,62 @@ export async function removeProduct(id: string): Promise<void> {
   throwIfError(error);
 }
 
+const baseOrderColumns =
+  "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,notes,created_at";
+const paymentOrderColumns = `${baseOrderColumns},paid,payment_method,payment_method_other`;
+const fullOrderColumns = `${paymentOrderColumns},discount_type,discount_value,approval_token,approval_status,approved_at,approved_by_name,approved_total`;
+
+type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boolean };
+
+// Falls back to older column sets until the matching Supabase migrations are applied.
+async function selectOrderRows<T extends { error: { code?: string; message: string } | null; data: unknown }>(
+  query: (columns: string) => PromiseLike<T>,
+): Promise<{ result: T; features: OrderFeatures }> {
+  let result = await query(fullOrderColumns);
+  if (!isMissingPaymentColumn(result.error)) {
+    return { result, features: { paymentTrackingAvailable: true, approvalAvailable: true } };
+  }
+  result = await query(paymentOrderColumns);
+  if (!isMissingPaymentColumn(result.error)) {
+    return { result, features: { paymentTrackingAvailable: true, approvalAvailable: false } };
+  }
+  result = await query(baseOrderColumns);
+  return { result, features: { paymentTrackingAvailable: false, approvalAvailable: false } };
+}
+
 export async function listOrders(options: {
   startDate?: string;
   endDateExclusive?: string;
   limit?: number;
 } = {}): Promise<OrderRecord[]> {
-  const queryOrders = (select: string) => {
+  const { result, features } = await selectOrderRows((columns) => {
     let query = supabase
-    .from("admin_orders")
-    .select(select)
-    .order("due_date", { ascending: true })
-    .limit(options.limit ?? 200);
+      .from("admin_orders")
+      .select(columns)
+      .order("due_date", { ascending: true })
+      .limit(options.limit ?? 200);
 
     if (options.startDate) query = query.gte("due_date", options.startDate);
     if (options.endDateExclusive) query = query.lt("due_date", options.endDateExclusive);
     return query;
-  };
-
-  let result = await queryOrders(
-    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,payment_method,payment_method_other,notes,created_at",
-  );
-  let paymentTrackingAvailable = true;
-  if (isMissingPaymentColumn(result.error)) {
-    paymentTrackingAvailable = false;
-    result = await queryOrders(
-      "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,notes,created_at",
-    );
-  }
+  });
   throwIfError(result.error);
-  return mapOrderRows((result.data ?? []) as unknown as OrderRow[], paymentTrackingAvailable);
+  return mapOrderRows((result.data ?? []) as unknown as OrderRow[], features);
 }
 
 export async function getOrder(id: string): Promise<OrderRecord | null> {
-  const orderColumns =
-    "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,paid,payment_method,payment_method_other,notes,created_at";
-  let result = await supabase
-    .from("admin_orders")
-    .select(orderColumns)
-    .eq("id", id)
-    .maybeSingle();
-  let paymentTrackingAvailable = true;
-  if (isMissingPaymentColumn(result.error)) {
-    paymentTrackingAvailable = false;
-    result = await supabase
-      .from("admin_orders")
-      .select("id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,notes,created_at")
-      .eq("id", id)
-      .maybeSingle();
-  }
+  const { result, features } = await selectOrderRows((columns) =>
+    supabase.from("admin_orders").select(columns).eq("id", id).maybeSingle(),
+  );
   throwIfError(result.error);
   if (!result.data) return null;
-  const orders = await mapOrderRows([result.data as OrderRow], paymentTrackingAvailable);
+  const orders = await mapOrderRows([result.data as unknown as OrderRow], features);
   return orders[0] ?? null;
 }
 
 async function mapOrderRows(
   orderRows: OrderRow[],
-  paymentTrackingAvailable: boolean,
+  { paymentTrackingAvailable, approvalAvailable }: OrderFeatures,
 ): Promise<OrderRecord[]> {
   if (orderRows.length === 0) return [];
   const orderIds = orderRows.map((row) => row.id);
@@ -330,6 +343,16 @@ async function mapOrderRows(
       paymentMethod: row.payment_method ?? null,
       paymentMethodOther: row.payment_method_other ?? "",
       paymentTrackingAvailable,
+      approvalAvailable,
+      discount:
+        row.discount_type && Number(row.discount_value) > 0
+          ? { type: row.discount_type, value: Number(row.discount_value) }
+          : null,
+      approvalToken: row.approval_token ?? "",
+      approvalStatus: row.approval_status ?? "draft",
+      approvedAt: row.approved_at ?? "",
+      approvedByName: row.approved_by_name ?? "",
+      approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
       notes: row.notes,
       items: itemsByOrder.get(row.id) ?? [],
       createdAt: row.created_at,
@@ -346,6 +369,8 @@ export async function updateOrder(
     paymentMethodOther?: string | null;
     dueDate?: string;
     notes?: string;
+    discount?: Discount;
+    approvalStatus?: ApprovalStatus;
   },
 ): Promise<void> {
   const values: {
@@ -356,6 +381,12 @@ export async function updateOrder(
     fulfilled_date?: string | null;
     due_date?: string;
     notes?: string;
+    discount_type?: DiscountType | null;
+    discount_value?: number;
+    approval_status?: ApprovalStatus;
+    approved_at?: string | null;
+    approved_by_name?: string | null;
+    approved_total?: number | null;
   } = {};
   if (changes.status) {
     values.status = changes.status;
@@ -366,6 +397,18 @@ export async function updateOrder(
   if (changes.paymentMethodOther !== undefined) values.payment_method_other = changes.paymentMethodOther;
   if (changes.dueDate !== undefined) values.due_date = changes.dueDate;
   if (changes.notes !== undefined) values.notes = changes.notes.trim();
+  if (changes.discount !== undefined) {
+    values.discount_type = changes.discount?.type ?? null;
+    values.discount_value = changes.discount?.value ?? 0;
+  }
+  if (changes.approvalStatus !== undefined) {
+    values.approval_status = changes.approvalStatus;
+    if (changes.approvalStatus !== "approved") {
+      values.approved_at = null;
+      values.approved_by_name = null;
+      values.approved_total = null;
+    }
+  }
 
   const { data, error } = await supabase
     .from("admin_orders")
@@ -496,4 +539,75 @@ export async function deleteOrder(id: string): Promise<void> {
     .maybeSingle();
   throwIfError(error);
   if (!data) throw new Error("Order was not found for this account.");
+}
+
+export type ApprovalOrder = {
+  orderNumber: string;
+  customerName: string;
+  dueDate: string;
+  status: OrderStatus;
+  approvalStatus: ApprovalStatus;
+  approvedAt: string;
+  approvedTotal: number | null;
+  subtotal: number;
+  discountAmount: number;
+  total: number;
+  items: { name: string; unitPrice: number; quantity: number }[];
+};
+
+type ApprovalPayload = {
+  order_number: string;
+  customer_name: string | null;
+  due_date: string;
+  status: OrderStatus;
+  approval_status: ApprovalStatus;
+  approved_at: string | null;
+  approved_total: number | string | null;
+  subtotal: number | string;
+  discount_amount: number | string;
+  total: number | string;
+  items: { name: string; unit_price: number | string; quantity: number }[];
+};
+
+function mapApprovalPayload(data: unknown): ApprovalOrder | null {
+  if (!data) return null;
+  const row = data as ApprovalPayload;
+  return {
+    orderNumber: row.order_number,
+    customerName: row.customer_name ?? "",
+    dueDate: row.due_date,
+    status: row.status,
+    approvalStatus: row.approval_status,
+    approvedAt: row.approved_at ?? "",
+    approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
+    subtotal: Number(row.subtotal),
+    discountAmount: Number(row.discount_amount),
+    total: Number(row.total),
+    items: row.items.map((item) => ({
+      name: item.name,
+      unitPrice: Number(item.unit_price),
+      quantity: item.quantity,
+    })),
+  };
+}
+
+/** Public, token-gated lookup used by the customer approval page. */
+export async function getOrderForApproval(token: string): Promise<ApprovalOrder | null> {
+  const { data, error } = await supabase.rpc("get_order_for_approval", { p_token: token });
+  throwIfError(error);
+  return mapApprovalPayload(data);
+}
+
+/** Public, token-gated approval; the approved amount is calculated on the server. */
+export async function approveOrder(token: string, name: string): Promise<ApprovalOrder | null> {
+  const { data, error } = await supabase.rpc("approve_order", { p_token: token, p_name: name });
+  throwIfError(error);
+  return mapApprovalPayload(data);
+}
+
+export async function savePushToken(ownerId: string, token: string): Promise<void> {
+  const { error } = await supabase
+    .from("admin_push_tokens")
+    .upsert({ owner_id: ownerId, token }, { onConflict: "owner_id,token" });
+  throwIfError(error);
 }

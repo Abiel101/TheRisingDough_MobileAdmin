@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 
-import { calculateOrderTotal, orderStatuses, orderStatusLabels, resolveStatus, type OrderStatus } from "@/domain/orders";
+import { calculateOrderTotals, orderStatuses, orderStatusLabels, resolveStatus, type OrderStatus } from "@/domain/orders";
 import { updateOrder, type OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -43,13 +43,14 @@ export function OrderCard({
     }
   }
 
-  const total = calculateOrderTotal(
+  const { total } = calculateOrderTotals(
     order.items.map((item) => ({
       productId: item.productId,
       productName: item.name,
       unitPrice: item.price,
       quantity: item.quantity,
     })),
+    order.discount,
   );
   const itemCount = order.items.reduce((count, item) => count + item.quantity, 0);
   const previewItems = order.items.slice(0, 2);

@@ -53,3 +53,24 @@ export type Customer = {
 export function calculateOrderTotal(items: readonly OrderLineItem[]): number {
   return items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
 }
+
+export type DiscountType = "percent" | "amount";
+
+export type Discount = { type: DiscountType; value: number } | null;
+
+export type ApprovalStatus = "draft" | "pending" | "approved";
+
+const roundCents = (value: number) => Math.round(value * 100) / 100;
+
+/** Percent discounts are capped at 100% and fixed discounts never exceed the subtotal. */
+export function calculateDiscountAmount(subtotal: number, discount: Discount): number {
+  if (!discount || discount.value <= 0 || subtotal <= 0) return 0;
+  if (discount.type === "percent") return roundCents(subtotal * (Math.min(discount.value, 100) / 100));
+  return roundCents(Math.min(discount.value, subtotal));
+}
+
+export function calculateOrderTotals(items: readonly OrderLineItem[], discount: Discount) {
+  const subtotal = calculateOrderTotal(items);
+  const discountAmount = calculateDiscountAmount(subtotal, discount);
+  return { subtotal, discountAmount, total: roundCents(subtotal - discountAmount) };
+}

@@ -15,6 +15,7 @@ import { router } from "expo-router";
 import { SafeAreaView, type SafeAreaViewProps } from "react-native-safe-area-context";
 
 import { NativeIcon } from "@/components/ui/native-icon";
+import { NotificationBell } from "@/components/notification-bell";
 import { NativeText } from "@/components/ui/native-text";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
@@ -49,10 +50,19 @@ export function ScreenHeader({
     <View style={styles.header}>
       <View style={styles.headerTop}>
         <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
-        <SettingsButton />
+        <HeaderActions />
       </View>
       <NativeText textStyle={styles.title}>{title}</NativeText>
       <NativeText textStyle={styles.subtitle}>{subtitle}</NativeText>
+    </View>
+  );
+}
+
+export function HeaderActions() {
+  return (
+    <View style={styles.headerActions}>
+      <NotificationBell />
+      <SettingsButton />
     </View>
   );
 }
@@ -89,7 +99,7 @@ export function SheetHeader({
         {subtitle ? <Text style={styles.subtitleText}>{subtitle}</Text> : null}
       </View>
       <View style={styles.sheetActions}>
-        {showSettings ? <SettingsButton /> : null}
+        {showSettings ? <HeaderActions /> : null}
         {rightAction}
         <Pressable
           accessibilityLabel="Close"
@@ -178,7 +188,14 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
+    paddingTop: spacing.xs,
     marginBottom: spacing.sm,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginRight: spacing.xs,
   },
   headerCopy: {
     flex: 1,
@@ -217,6 +234,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
+    marginRight: spacing.xs,
   },
   fixedHeader: {
     paddingHorizontal: spacing.lg,

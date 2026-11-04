@@ -8,6 +8,7 @@ import { SearchField } from "@/components/ui/design";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
+import { allocateLineTotals, calculateOrderTotals, type DiscountType } from "@/domain/orders";
 import { addCustomer, createOrder, listCustomers, listProducts, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
@@ -35,6 +36,8 @@ export default function NewOrderScreen() {
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
   const [dueDate, setDueDate] = useState(localTodayKey);
   const [notes, setNotes] = useState("");
+  const [discountType, setDiscountType] = useState<DiscountType>("percent");
+  const [discountInput, setDiscountInput] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -66,8 +69,24 @@ export default function NewOrderScreen() {
     return quantity > 0 ? [{ product, quantity }] : [];
   });
 
-  const total = selectedItems.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
-  const canCreate = !saving && !!selectedCustomer && selectedItems.length > 0;
+  const discountValue = Math.round((Number(discountInput.replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
+  const lineItems = selectedItems.map(({ product, quantity }) => ({
+    productId: product.id,
+    productName: product.name,
+    unitPrice: product.price,
+    quantity,
+  }));
+  const discount = discountValue > 0 ? { type: discountType, value: discountValue } : null;
+  const { subtotal, discountAmount, total } = calculateOrderTotals(lineItems, discount);
+  const discountedLineTotals = allocateLineTotals(lineItems, discountAmount);
+  const discountedTotalByProduct = new Map(lineItems.map((item, index) => [item.productId, discountedLineTotals[index]]));
+  const discountError =
+    discountType === "percent" && discountValue > 100
+      ? "A percentage discount can’t be more than 100%."
+      : discountType === "amount" && discountValue > subtotal
+        ? "A discount can’t be more than the order subtotal."
+        : "";
+  const canCreate = !saving && !!selectedCustomer && selectedItems.length > 0 && !discountError;
 
   async function saveCustomer() {
     if (!session?.user.id) return;
@@ -104,7 +123,7 @@ export default function NewOrderScreen() {
     setSaving(true);
     setError("");
     try {
-      const id = await createOrder({ ownerId: session.user.id, customer: selectedCustomer, dueDate, notes, items: selectedItems });
+      const id = await createOrder({ ownerId: session.user.id, customer: selectedCustomer, dueDate, notes, items: selectedItems, discount });
       router.replace({ pathname: "/order/[id]", params: { id } });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create this order.");
@@ -165,7 +184,17 @@ export default function NewOrderScreen() {
           const quantity = quantities[product.id] ?? 0;
           return (
             <View key={product.id} style={styles.productRow}>
-              <View style={styles.customerCopy}><Text style={styles.customerName}>{product.name}</Text><Text style={styles.hint}>${product.price.toFixed(2)}</Text></View>
+              <View style={styles.customerCopy}>
+                <Text style={styles.customerName}>{product.name}</Text>
+                {quantity > 0 && discountAmount > 0 ? (
+                  <View style={styles.priceRow}>
+                    <Text style={styles.struck}>${(product.price * quantity).toFixed(2)}</Text>
+                    <Text style={styles.sale}>${(discountedTotalByProduct.get(product.id) ?? 0).toFixed(2)}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.hint}>${product.price.toFixed(2)}</Text>
+                )}
+              </View>
               <Pressable accessibilityLabel={`Remove one ${product.name}`} disabled={!quantity || saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: Math.max((current[product.id] ?? 0) - 1, 0) }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
               <Text style={styles.quantityText}>{quantity}</Text>
               <Pressable accessibilityLabel={`Add one ${product.name}`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
@@ -174,11 +203,43 @@ export default function NewOrderScreen() {
         })}
         <NativeFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
       </ContentCard>
+      <ContentCard style={styles.card}>
+        <Text style={styles.sectionTitle}>Discount (optional)</Text>
+        <View style={styles.chipRow}>
+          {(["percent", "amount"] as const).map((type) => {
+            const selected = discountType === type;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                key={type}
+                onPress={() => setDiscountType(type)}
+                style={[styles.chip, selected && styles.chipSelected]}
+              >
+                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                  {type === "percent" ? "Percent (%)" : "Amount ($)"}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <NativeFormField
+          keyboardType="decimal-pad"
+          label={discountType === "percent" ? "Discount percent" : "Discount amount"}
+          onChangeText={setDiscountInput}
+          placeholder={discountType === "percent" ? "10" : "5.00"}
+          value={discountInput}
+        />
+        {discountError ? <Text style={styles.errorText}>{discountError}</Text> : null}
+      </ContentCard>
     </AppScreen>
     <View style={styles.footer}>
       <View>
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
+        <Text style={styles.totalLabel}>{discountAmount > 0 ? `Total · ${formatCurrency(discountAmount)} off` : "Total"}</Text>
+        <View style={styles.priceRow}>
+          {discountAmount > 0 ? <Text style={styles.struckBig}>{formatCurrency(subtotal)}</Text> : null}
+          <Text style={[styles.totalValue, discountAmount > 0 && { color: colors.sale }]}>{formatCurrency(total)}</Text>
+        </View>
       </View>
       <Pressable
         accessibilityRole="button"
@@ -215,4 +276,14 @@ const styles = StyleSheet.create({
   quantityButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.parchment },
   quantitySymbol: { color: colors.teal, fontSize: 19, fontWeight: "700" },
   quantityText: { minWidth: 20, color: colors.espresso, textAlign: "center", fontWeight: "700" },
+  priceRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
+  struck: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },
+  struckBig: { color: colors.mutedText, fontSize: 15, textDecorationLine: "line-through" },
+  sale: { color: colors.sale, fontSize: 13, fontWeight: "700" },
+  errorText: { color: colors.brick, fontSize: 12 },
+  chipRow: { flexDirection: "row", gap: spacing.sm },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.card },
+  chipSelected: { backgroundColor: colors.teal, borderColor: colors.teal },
+  chipText: { color: colors.teal, fontSize: 13, fontWeight: "600" },
+  chipTextSelected: { color: colors.card },
 });

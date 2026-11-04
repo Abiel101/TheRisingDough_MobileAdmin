@@ -115,6 +115,7 @@ function RootNavigator() {
             <Stack.Screen name="order/[id]" options={modalOptions} />
             <Stack.Screen name="order/new" options={modalOptions} />
             <Stack.Screen name="settings" options={modalOptions} />
+            <Stack.Screen name="notifications" options={modalOptions} />
             <Stack.Screen name="customer/[id]" options={modalOptions} />
             <Stack.Screen name="customer/new" options={modalOptions} />
             <Stack.Screen name="catalog/new" options={modalOptions} />

@@ -59,7 +59,7 @@ export default function CustomersScreen() {
   );
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <FlatList
         contentContainerStyle={styles.content}
         data={error && customers.length === 0 ? [] : visibleCustomers}

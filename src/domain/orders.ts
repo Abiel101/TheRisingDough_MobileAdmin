@@ -58,7 +58,7 @@ export type DiscountType = "percent" | "amount";
 
 export type Discount = { type: DiscountType; value: number } | null;
 
-export type ApprovalStatus = "draft" | "pending" | "approved";
+export type ApprovalStatus = "draft" | "pending" | "approved" | "declined";
 
 const roundCents = (value: number) => Math.round(value * 100) / 100;
 
@@ -67,6 +67,23 @@ export function calculateDiscountAmount(subtotal: number, discount: Discount): n
   if (!discount || discount.value <= 0 || subtotal <= 0) return 0;
   if (discount.type === "percent") return roundCents(subtotal * (Math.min(discount.value, 100) / 100));
   return roundCents(Math.min(discount.value, subtotal));
+}
+
+/**
+ * Spreads an order-level discount across its lines in proportion to their value.
+ * Returns each line's discounted total; the last discounted line absorbs rounding.
+ */
+export function allocateLineTotals(items: readonly OrderLineItem[], discountAmount: number): number[] {
+  const subtotal = calculateOrderTotal(items);
+  if (discountAmount <= 0 || subtotal <= 0) return items.map((item) => roundCents(item.unitPrice * item.quantity));
+  let remaining = discountAmount;
+  const lastIndex = items.reduce((last, item, index) => (item.unitPrice * item.quantity > 0 ? index : last), -1);
+  return items.map((item, index) => {
+    const line = roundCents(item.unitPrice * item.quantity);
+    const share = index === lastIndex ? remaining : Math.min(roundCents((line / subtotal) * discountAmount), remaining);
+    remaining = roundCents(remaining - share);
+    return roundCents(line - share);
+  });
 }
 
 export function calculateOrderTotals(items: readonly OrderLineItem[], discount: Discount) {

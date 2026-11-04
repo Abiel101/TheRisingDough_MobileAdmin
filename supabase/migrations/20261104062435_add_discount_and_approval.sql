@@ -155,6 +155,9 @@ begin
 end;
 $$;
 
+-- This function is only invoked by the table trigger, never through the Data API.
+revoke all on function public.notify_order_approved() from public, anon, authenticated;
+
 drop trigger if exists admin_orders_notify_approved on public.admin_orders;
 create trigger admin_orders_notify_approved
   after update of approval_status on public.admin_orders

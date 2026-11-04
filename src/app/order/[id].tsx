@@ -15,22 +15,23 @@ import {
   View,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "@/auth/auth-context";
 import {
+  allocateLineTotals,
   calculateOrderTotals,
   orderStatuses,
   orderStatusLabels,
   paymentMethods,
   resolveStatus,
-  type DiscountType,
   type OrderStatus,
   type PaymentMethod,
 } from "@/domain/orders";
 import { formatDate } from "@/components/order-card";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
-import { printInvoice, shareInvoicePdf } from "@/lib/invoice";
+import { canInvoice, shareInvoicePdf } from "@/lib/invoice";
 import { NativeIcon } from "@/components/ui/native-icon";
 import { FormField, MessageCard } from "@/components/ui/screen-primitives";
 import {
@@ -113,8 +114,7 @@ export default function OrderDetailScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const [paymentMethodChoice, setPaymentMethodChoice] = useState<PaymentMethod>("cash");
   const [paymentMethodOtherChoice, setPaymentMethodOtherChoice] = useState("");
-  const [discountType, setDiscountType] = useState<DiscountType>("percent");
-  const [discountInput, setDiscountInput] = useState("");
+  const [approvalLink, setApprovalLink] = useState("");
   const [notice, setNotice] = useState("");
   const [menuMode, setMenuMode] = useState<MenuMode>("closed");
   const [cancelReason, setCancelReason] = useState("");
@@ -134,8 +134,6 @@ export default function OrderDetailScreen() {
       if (result) {
         setPaymentMethodChoice(result.paymentMethod ?? "cash");
         setPaymentMethodOtherChoice(result.paymentMethodOther);
-        setDiscountType(result.discount?.type ?? "percent");
-        setDiscountInput(result.discount ? String(result.discount.value) : "");
       }
       setError(result ? "" : "This order could not be found.");
     } catch (cause) {
@@ -230,50 +228,36 @@ export default function OrderDetailScreen() {
     if (order?.approvalStatus === "approved") await updateOrder(order.id, { approvalStatus: "pending" });
   }
 
-  function applyDiscount() {
-    if (!order) return;
-    const value = Number(discountInput.replace(/[^0-9.]/g, ""));
-    if (!discountInput.trim() || !Number.isFinite(value) || value <= 0) {
-      setError("Enter a discount greater than zero, or remove the discount.");
-      return;
-    }
-    if (discountType === "percent" && value > 100) {
-      setError("A percentage discount can’t be more than 100%.");
-      return;
-    }
-    if (discountType === "amount" && value > subtotal) {
-      setError("A discount can’t be more than the order subtotal.");
-      return;
-    }
-    const rounded = Math.round(value * 100) / 100;
-    void changeOrder({
-      discount: { type: discountType, value: rounded },
-      ...(order.approvalStatus === "approved" ? { approvalStatus: "pending" as const } : {}),
-    });
+  function approvalUrl() {
+    const webOrigin = Platform.OS === "web" && typeof window !== "undefined" ? window.location.origin : "";
+    const base = approvalBaseUrl || webOrigin;
+    return base && order ? `${base}/approve/${order.approvalToken}` : "";
   }
 
-  function removeDiscount() {
-    if (!order) return;
-    setDiscountInput("");
-    void changeOrder({
-      discount: null,
-      ...(order.approvalStatus === "approved" ? { approvalStatus: "pending" as const } : {}),
-    });
-  }
-
+  // Marks the order as awaiting approval and reveals the link so it can be copied or shared.
   async function sendApprovalLink() {
     if (!order) return;
-    if (!approvalBaseUrl) {
-      setError("Set EXPO_PUBLIC_APPROVAL_BASE_URL to the hosted web address of this app to send approval links.");
+    const link = approvalUrl();
+    if (!link) {
+      setError("Set EXPO_PUBLIC_APPROVAL_BASE_URL to the hosted web address of this app to create approval links.");
       return;
     }
-    const link = `${approvalBaseUrl}/approve/${order.approvalToken}`;
-    const ok =
-      order.approvalStatus === "approved" || order.approvalStatus === "pending"
-        ? true
-        : await changeOrder({ approvalStatus: "pending" });
-    if (!ok) return;
-    const message = `Hi ${firstName}, please review and approve your order ${order.number} (${formatCurrency(total)}): ${link}`;
+    if (order.approvalStatus !== "pending" && !(await changeOrder({ approvalStatus: "pending" }))) return;
+    setApprovalLink(link);
+  }
+
+  async function copyApprovalLink() {
+    try {
+      await Clipboard.setStringAsync(approvalLink);
+      setNotice("Approval link copied. Paste it into a text or email to your customer.");
+    } catch {
+      setError("Could not copy the link.");
+    }
+  }
+
+  async function shareApprovalLink() {
+    if (!order) return;
+    const message = `Hi ${firstName}, please review and approve your order ${order.number} (${formatCurrency(total)}): ${approvalLink}`;
     try {
       if (Platform.OS === "web" && !navigator.share) {
         await navigator.clipboard.writeText(message);
@@ -288,11 +272,11 @@ export default function OrderDetailScreen() {
     }
   }
 
-  async function invoiceAction(action: (order: OrderRecord) => Promise<void>) {
+  async function shareInvoice() {
     if (!order) return;
     setError("");
     try {
-      await action(order);
+      await shareInvoicePdf(order);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create the invoice.");
     }
@@ -348,17 +332,16 @@ export default function OrderDetailScreen() {
   const cancelled = order.status === "Cancelled";
   const completed = order.status === "Fulfilled";
   const progressIndex = order.status === "Cancelled" ? -1 : orderStatuses.indexOf(order.status);
-  const { subtotal, discountAmount, total } = calculateOrderTotals(
-    order.items.map((item) => ({
-      productId: item.productId,
-      productName: item.name,
-      unitPrice: item.price,
-      quantity: item.quantity,
-    })),
-    order.discount,
-  );
+  const lineItems = order.items.map((item) => ({
+    productId: item.productId,
+    productName: item.name,
+    unitPrice: item.price,
+    quantity: item.quantity,
+  }));
+  const { subtotal, discountAmount, total } = calculateOrderTotals(lineItems, order.discount);
+  const discountedLineTotals = allocateLineTotals(lineItems, discountAmount);
   const approved = order.approvalStatus === "approved";
-  const canEditDiscount = !cancelled && !completed;
+  const awaitingApproval = order.approvalAvailable && order.approvalStatus === "pending" && !cancelled;
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const paymentTracked = order.paymentTrackingAvailable;
   const canAddItems = !cancelled && !completed && daysUntil(order.dueDate) >= ADD_ITEMS_CUTOFF_DAYS;
@@ -468,8 +451,8 @@ export default function OrderDetailScreen() {
               return (
                 <View key={status} style={styles.segmentCell}>
                   <View style={[styles.segment, reached && { backgroundColor: statusColors[status] }]} />
-                  <Text style={[styles.segmentLabel, reached && styles.segmentLabelReached]} numberOfLines={1}>
-                    {orderStatusLabels[status]}
+                  <Text style={[styles.segmentLabel, reached && styles.segmentLabelReached]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    {status === "Pending" && awaitingApproval ? "Pending approval" : orderStatusLabels[status]}
                   </Text>
                 </View>
               );
@@ -530,7 +513,14 @@ export default function OrderDetailScreen() {
                 <Text style={styles.itemName}>{item.name}</Text>
                 <Text style={styles.muted}>{formatCurrency(item.price)} each</Text>
               </View>
-              <Text style={styles.itemTotal}>{formatCurrency(item.quantity * item.price)}</Text>
+              {discountedLineTotals[order.items.indexOf(item)] < item.quantity * item.price ? (
+                <View style={styles.itemTotals}>
+                  <Text style={styles.struck}>{formatCurrency(item.quantity * item.price)}</Text>
+                  <Text style={styles.saleText}>{formatCurrency(discountedLineTotals[order.items.indexOf(item)])}</Text>
+                </View>
+              ) : (
+                <Text style={styles.itemTotal}>{formatCurrency(item.quantity * item.price)}</Text>
+              )}
               {canRemoveItems ? (
                 <Pressable
                   accessibilityLabel={`Remove ${item.name}`}
@@ -546,75 +536,22 @@ export default function OrderDetailScreen() {
           )) : <Text style={styles.muted}>No item details were saved with this order.</Text>}
         </View>
 
-        {order.approvalAvailable ? (
+        {discountAmount > 0 ? (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Discount</Text>
-            {discountAmount > 0 ? (
-              <>
-                <InfoRow label="Subtotal" value={formatCurrency(subtotal)} />
-                <InfoRow
-                  label={order.discount?.type === "percent" ? `Discount (${order.discount.value}%)` : "Discount"}
-                  value={`−${formatCurrency(discountAmount)}`}
-                  strong
-                />
-              </>
-            ) : null}
-            {canEditDiscount ? (
-              <>
-                <View style={styles.chipRow}>
-                  {(["percent", "amount"] as const).map((type) => {
-                    const selected = discountType === type;
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityState={{ selected, disabled: saving }}
-                        disabled={saving}
-                        key={type}
-                        onPress={() => setDiscountType(type)}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                          {type === "percent" ? "Percent (%)" : "Amount ($)"}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <FormField
-                  editable={!saving}
-                  keyboardType="decimal-pad"
-                  label={discountType === "percent" ? "Discount percent" : "Discount amount"}
-                  onChangeText={setDiscountInput}
-                  placeholder={discountType === "percent" ? "10" : "5.00"}
-                  value={discountInput}
-                />
-                <View style={styles.menuActions}>
-                  {order.discount ? (
-                    <Pressable accessibilityRole="button" disabled={saving} onPress={removeDiscount} style={[styles.outlineAction, saving && styles.disabled]}>
-                      <Text style={styles.outlineActionText}>Remove</Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable accessibilityRole="button" disabled={saving} onPress={applyDiscount} style={[styles.solidAction, styles.footerFlex, saving && styles.disabled]}>
-                    <Text style={styles.solidActionText}>{saving ? "Saving…" : "Apply discount"}</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.muted}>Discounts can’t be changed on cancelled or completed orders.</Text>
-            )}
+            <Text style={styles.sectionTitle}>Discount applied</Text>
+            <InfoRow label="Subtotal" value={formatCurrency(subtotal)} />
+            <View style={styles.infoRow}>
+              <Text style={styles.saleText}>
+                {order.discount?.type === "percent" ? `Discount (${order.discount.value}%)` : "Discount"}
+              </Text>
+              <Text style={styles.saleText}>−{formatCurrency(discountAmount)}</Text>
+            </View>
+            <InfoRow label="Total" value={formatCurrency(total)} strong />
           </View>
         ) : null}
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Invoice & approval</Text>
-          <View style={styles.menuActions}>
-            <Pressable accessibilityRole="button" onPress={() => void invoiceAction(printInvoice)} style={[styles.outlineAction, styles.footerFlex]}>
-              <Text style={styles.outlineActionText}>Print invoice</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => void invoiceAction(shareInvoicePdf)} style={[styles.outlineAction, styles.footerFlex]}>
-              <Text style={styles.outlineActionText}>Share PDF</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.sectionTitle}>Approval</Text>
           {order.approvalAvailable && !cancelled ? (
             <>
               {approved ? (
@@ -627,19 +564,44 @@ export default function OrderDetailScreen() {
                 <Text style={styles.hint}>
                   {order.approvalStatus === "pending"
                     ? "Waiting for the customer to approve. You’ll get a notification when they do."
-                    : "Send the customer a link to review and approve this order and its amount."}
+                    : order.approvalStatus === "declined"
+                      ? `The customer declined${order.declinedAt ? ` on ${new Date(order.declinedAt).toLocaleDateString()}` : ""}. You can send a new approval link if needed.`
+                      : "Create a link for the customer to review and approve this order and its amount."}
                 </Text>
               )}
-              {!approved ? (
+              {!approved && approvalLink ? (
+                <View style={styles.linkBox}>
+                  <Text selectable style={styles.linkText}>{approvalLink}</Text>
+                  <View style={styles.menuActions}>
+                    <Pressable accessibilityRole="button" onPress={() => void copyApprovalLink()} style={[styles.outlineAction, styles.footerFlex]}>
+                      <Text style={styles.outlineActionText}>Copy link</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" onPress={() => void shareApprovalLink()} style={[styles.solidAction, styles.footerFlex]}>
+                      <Text style={styles.solidActionText}>Send to customer</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+              {!approved && !approvalLink ? (
                 <Pressable accessibilityRole="button" disabled={saving} onPress={() => void sendApprovalLink()} style={[styles.solidAction, saving && styles.disabled]}>
-                  <Text style={styles.solidActionText}>
-                    {order.approvalStatus === "pending" ? "Resend approval link" : "Send approval link"}
-                  </Text>
+                  <Text style={styles.solidActionText}>{order.approvalStatus === "declined" ? "Send new approval link" : "Send approval link"}</Text>
                 </Pressable>
               ) : null}
             </>
-          ) : null}
+          ) : (
+            <Text style={styles.hint}>Approval isn’t available for this order.</Text>
+          )}
         </View>
+
+        {canInvoice(order) ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Invoice</Text>
+            <Text style={styles.hint}>Includes the items, any discount, the amount paid and the payment method.</Text>
+            <Pressable accessibilityRole="button" onPress={() => void shareInvoice()} style={styles.solidAction}>
+              <Text style={styles.solidActionText}>Share invoice</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {paymentTracked ? (
           <View style={styles.card}>
@@ -960,6 +922,11 @@ const styles = StyleSheet.create({
   itemCopy: { flex: 1, gap: 2 },
   itemName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   itemTotal: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  itemTotals: { alignItems: "flex-end" },
+  struck: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },
+  saleText: { color: colors.sale, fontSize: 14, fontWeight: "700" },
+  linkBox: { gap: spacing.sm, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.parchment, padding: spacing.md },
+  linkText: { color: colors.espresso, fontSize: 12, lineHeight: 17 },
   removeItemButton: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.parchment },
   removeItemText: { color: colors.brick, fontSize: 12, fontWeight: "700" },
   chipRow: { flexDirection: "row", gap: spacing.sm },

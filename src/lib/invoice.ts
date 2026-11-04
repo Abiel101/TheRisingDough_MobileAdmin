@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
-import { calculateOrderTotals } from "@/domain/orders";
+import { allocateLineTotals, calculateOrderTotals, type PaymentMethod } from "@/domain/orders";
 import type { OrderRecord } from "@/lib/workspace";
 
 const money = (value: number) =>
@@ -26,32 +26,46 @@ function longDate(dateKey: string) {
   });
 }
 
+const methodLabels: Record<PaymentMethod, string> = { cash: "Cash", zelle: "Zelle", other: "Other" };
+
+function paymentMethodText(order: OrderRecord) {
+  if (!order.paymentMethod) return "Not recorded";
+  return order.paymentMethod === "other" ? order.paymentMethodOther || "Other" : methodLabels[order.paymentMethod];
+}
+
+/** Invoices are only issued once an order is completed (fulfilled and paid). */
+export function canInvoice(order: OrderRecord): boolean {
+  return order.status === "Fulfilled" && order.paid;
+}
+
 export function buildInvoiceHtml(order: OrderRecord): string {
-  const { subtotal, discountAmount, total } = calculateOrderTotals(
-    order.items.map((item) => ({
-      productId: item.productId,
-      productName: item.name,
-      unitPrice: item.price,
-      quantity: item.quantity,
-    })),
-    order.discount,
-  );
+  const lineItems = order.items.map((item) => ({
+    productId: item.productId,
+    productName: item.name,
+    unitPrice: item.price,
+    quantity: item.quantity,
+  }));
+  const { subtotal, discountAmount, total } = calculateOrderTotals(lineItems, order.discount);
+  const discountedTotals = allocateLineTotals(lineItems, discountAmount);
   const discountLabel = order.discount
     ? order.discount.type === "percent"
       ? `Discount (${order.discount.value}%)`
       : "Discount"
     : "";
   const rows = order.items
-    .map(
-      (item) => `<tr>
+    .map((item, index) => {
+      const original = item.price * item.quantity;
+      const discounted = discountedTotals[index];
+      const isDiscounted = discounted < original;
+      return `<tr>
         <td>${escapeHtml(item.name)}</td>
         <td class="num">${item.quantity}</td>
         <td class="num">${money(item.price)}</td>
-        <td class="num">${money(item.price * item.quantity)}</td>
-      </tr>`,
-    )
+        <td class="num">${isDiscounted ? `<span class="was">${money(original)}</span><br/><span class="sale">${money(discounted)}</span>` : money(original)}</td>
+      </tr>`;
+    })
     .join("");
-  const status = order.status === "Cancelled" ? "CANCELLED" : order.paid ? "PAID" : "BALANCE DUE";
+  const status = "PAID";
   const contact = [order.customerPhone, order.customerEmail, order.customerAddress]
     .filter(Boolean)
     .map(escapeHtml)
@@ -70,6 +84,10 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     th { text-align: left; border-bottom: 2px solid #302017; padding: 8px 4px; }
     td { padding: 8px 4px; border-bottom: 1px solid #E9E4DA; }
     .num { text-align: right; }
+    .was { color: #82796C; text-decoration: line-through; font-size: 12px; }
+    .sale { color: #D32F2F; font-weight: 700; }
+    .pay { margin-top: 24px; font-size: 14px; border: 1px solid #E9E4DA; border-radius: 8px; padding: 12px; }
+    .pay div { display: flex; justify-content: space-between; padding: 3px 0; }
     .totals { margin: 16px 0 0 auto; width: 260px; font-size: 14px; }
     .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
     .grand { border-top: 2px solid #302017; font-weight: 700; font-size: 17px; margin-top: 4px; padding-top: 8px !important; }
@@ -92,8 +110,14 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     </table>
     <div class="totals">
       <div><span>Subtotal</span><span>${money(subtotal)}</span></div>
-      ${discountAmount > 0 ? `<div><span>${escapeHtml(discountLabel)}</span><span>−${money(discountAmount)}</span></div>` : ""}
+      ${discountAmount > 0 ? `<div class="sale"><span>${escapeHtml(discountLabel)}</span><span>−${money(discountAmount)}</span></div>` : ""}
       <div class="grand"><span>Total</span><span>${money(total)}</span></div>
+    </div>
+    <div class="pay">
+      <div><strong>Payment</strong><span></span></div>
+      <div><span>Amount paid</span><span>${money(total)}</span></div>
+      <div><span>Payment method</span><span>${escapeHtml(paymentMethodText(order))}</span></div>
+      ${order.fulfilledDate ? `<div><span>Completed</span><span>${longDate(order.fulfilledDate)}</span></div>` : ""}
     </div>
     ${order.notes ? `<div class="notes"><strong>Notes</strong><br/>${escapeHtml(order.notes)}</div>` : ""}
     <div class="foot">Thank you for your order!</div>
@@ -101,10 +125,12 @@ export function buildInvoiceHtml(order: OrderRecord): string {
 }
 
 export async function printInvoice(order: OrderRecord): Promise<void> {
+  if (!canInvoice(order)) throw new Error("Invoices are available once the order is completed.");
   await Print.printAsync({ html: buildInvoiceHtml(order) });
 }
 
 export async function shareInvoicePdf(order: OrderRecord): Promise<void> {
+  if (!canInvoice(order)) throw new Error("Invoices are available once the order is completed.");
   if (Platform.OS === "web") {
     await printInvoice(order);
     return;

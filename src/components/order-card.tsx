@@ -71,6 +71,8 @@ export function OrderCard({
         <Text numberOfLines={1} style={styles.customer}>{order.customer}</Text>
         <StatusPill
           paid={order.paymentTrackingAvailable ? order.paid : undefined}
+          awaitingApproval={order.approvalStatus === "pending" && status !== "Cancelled"}
+          approvalDeclined={order.approvalStatus === "declined" && status !== "Cancelled"}
           status={status}
         />
       </View>
@@ -127,13 +129,25 @@ const pillTones: Record<OrderRecord["status"], { background: string; color: stri
   Cancelled: { background: "#F2D9D2", color: colors.brick },
 };
 
-export function StatusPill({ status, paid }: { status: OrderRecord["status"]; paid?: boolean }) {
+export function StatusPill({ status, paid, awaitingApproval, approvalDeclined }: { status: OrderRecord["status"]; paid?: boolean; awaitingApproval?: boolean; approvalDeclined?: boolean }) {
   const tone = pillTones[status];
   return (
     <View style={styles.pillGroup}>
-      <View style={[styles.pill, { backgroundColor: tone.background }]}>
-        <Text style={[styles.pillText, { color: tone.color }]}>{orderStatusLabels[status]}</Text>
-      </View>
+      {awaitingApproval ? (
+        <View style={[styles.pill, { backgroundColor: "#F3E3B3" }]}>
+          <Text style={[styles.pillText, { color: "#6B4E0A" }]}>Pending approval</Text>
+        </View>
+      ) : null}
+      {approvalDeclined ? (
+        <View style={[styles.pill, { backgroundColor: "#F2D9D2" }]}>
+          <Text style={[styles.pillText, { color: colors.brick }]}>Declined</Text>
+        </View>
+      ) : null}
+      {!((awaitingApproval || approvalDeclined) && status === "Pending") ? (
+        <View style={[styles.pill, { backgroundColor: tone.background }]}>
+          <Text style={[styles.pillText, { color: tone.color }]}>{orderStatusLabels[status]}</Text>
+        </View>
+      ) : null}
       {paid !== undefined ? (
         <View style={[styles.pill, { backgroundColor: paid ? "#DCE8D2" : "#F8DCD5" }]}>
           <Text style={[styles.pillText, { color: paid ? "#3E5A2C" : colors.brick }]}>{paid ? "Paid" : "Unpaid"}</Text>

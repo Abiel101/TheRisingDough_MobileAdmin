@@ -11,7 +11,13 @@ import { listOrders, type OrderRecord } from "@/lib/workspace";
 import type { OrderStatus } from "@/domain/orders";
 import { colors, spacing } from "@/theme/tokens";
 
-type OrderView = "Active" | "Completed" | "Cancelled";
+type OrderView = "Active" | "Pending approval" | "Completed" | "Cancelled";
+const viewLabels: Record<OrderView, string> = {
+  Active: "Active",
+  "Pending approval": "Approval",
+  Completed: "Completed",
+  Cancelled: "Cancelled",
+};
 
 function isCompleted(order: OrderRecord) {
   return order.status === "Fulfilled" && order.paid;
@@ -20,6 +26,7 @@ function isCompleted(order: OrderRecord) {
 function belongsInView(order: OrderRecord, view: OrderView) {
   if (view === "Cancelled") return order.status === "Cancelled";
   if (view === "Completed") return isCompleted(order);
+  if (view === "Pending approval") return order.status !== "Cancelled" && order.approvalStatus === "pending";
   return order.status !== "Cancelled" && !isCompleted(order);
 }
 
@@ -76,9 +83,9 @@ export default function OrdersScreen() {
       <ScreenHeader title="Orders" subtitle="A clear view of every order in the queue." />
       <NativeSegmentedControl
         onChange={setOrderView}
-        options={(["Active", "Completed", "Cancelled"] as const).map((view) => ({
+        options={(["Active", "Pending approval", "Completed", "Cancelled"] as const).map((view) => ({
           value: view,
-          label: `${view} (${orders.filter((order) => belongsInView(order, view)).length})`,
+          label: `${viewLabels[view]} (${orders.filter((order) => belongsInView(order, view)).length})`,
         }))}
         value={orderView}
       />
@@ -92,14 +99,14 @@ export default function OrdersScreen() {
       {!loading && !error && visibleOrders.length === 0 ? (
         <MessageCard
           title={hasOrdersInView ? "No matching orders" : `No ${orderView.toLowerCase()} orders yet`}
-          message={hasOrdersInView ? "Try another search." : orderView === "Completed" ? "Orders move here when they are fulfilled and paid." : orderView === "Cancelled" ? "Cancelled orders will be kept here." : "Add an order to get started. Fulfilled but unpaid orders remain active."}
+          message={hasOrdersInView ? "Try another search." : orderView === "Completed" ? "Orders move here when they are fulfilled and paid." : orderView === "Cancelled" ? "Cancelled orders will be kept here." : orderView === "Pending approval" ? "Orders whose approval link has been sent but not yet approved appear here." : "Add an order to get started. Fulfilled but unpaid orders remain active."}
         />
       ) : null}
     </View>
   );
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <FlatList
         contentContainerStyle={styles.content}
         data={error ? [] : visibleOrders}

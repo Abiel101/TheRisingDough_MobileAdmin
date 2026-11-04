@@ -14,6 +14,7 @@ export const colors = {
   sage: "#687A55",
   orange: "#C65A27",
   brick: "#A83F2D",
+  sale: "#D32F2F",
   bronze: "#A86F32",
   mutedText: "#82796C",
   border: "#E9E4DA",

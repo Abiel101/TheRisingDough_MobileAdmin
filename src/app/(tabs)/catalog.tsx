@@ -61,7 +61,7 @@ export default function CatalogScreen() {
   );
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <FlatList
         contentContainerStyle={styles.content}
         data={error && products.length === 0 ? [] : visibleProducts}

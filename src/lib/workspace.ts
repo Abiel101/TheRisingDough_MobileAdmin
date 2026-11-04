@@ -41,6 +41,7 @@ export type OrderRecord = {
   approvedAt: string;
   approvedByName: string;
   approvedTotal: number | null;
+  declinedAt: string;
   notes: string;
   items: OrderLine[];
   createdAt: string;
@@ -73,6 +74,7 @@ type OrderRow = {
   approved_at?: string | null;
   approved_by_name?: string | null;
   approved_total?: number | string | null;
+  declined_at?: string | null;
   notes: string;
   created_at: string;
 };
@@ -235,7 +237,7 @@ export async function removeProduct(id: string): Promise<void> {
 const baseOrderColumns =
   "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,notes,created_at";
 const paymentOrderColumns = `${baseOrderColumns},paid,payment_method,payment_method_other`;
-const fullOrderColumns = `${paymentOrderColumns},discount_type,discount_value,approval_token,approval_status,approved_at,approved_by_name,approved_total`;
+const fullOrderColumns = `${paymentOrderColumns},discount_type,discount_value,approval_token,approval_status,approved_at,approved_by_name,approved_total,declined_at`;
 
 type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boolean };
 
@@ -353,6 +355,7 @@ async function mapOrderRows(
       approvedAt: row.approved_at ?? "",
       approvedByName: row.approved_by_name ?? "",
       approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
+      declinedAt: row.declined_at ?? "",
       notes: row.notes,
       items: itemsByOrder.get(row.id) ?? [],
       createdAt: row.created_at,
@@ -387,6 +390,7 @@ export async function updateOrder(
     approved_at?: string | null;
     approved_by_name?: string | null;
     approved_total?: number | null;
+    declined_at?: string | null;
   } = {};
   if (changes.status) {
     values.status = changes.status;
@@ -408,6 +412,7 @@ export async function updateOrder(
       values.approved_by_name = null;
       values.approved_total = null;
     }
+    if (changes.approvalStatus !== "declined") values.declined_at = null;
   }
 
   const { data, error } = await supabase
@@ -446,6 +451,7 @@ export async function createOrder(input: {
   dueDate: string;
   notes: string;
   items: OrderItemInput[];
+  discount?: Discount;
 }): Promise<string> {
   validateOrderItems(input.items);
   const { data: latest, error: latestError } = await supabase
@@ -468,6 +474,7 @@ export async function createOrder(input: {
       status: "Pending",
       paid: false,
       notes: input.notes.trim(),
+      ...(input.discount ? { discount_type: input.discount.type, discount_value: input.discount.value } : {}),
     })
     .select("id")
     .single();
@@ -549,6 +556,7 @@ export type ApprovalOrder = {
   approvalStatus: ApprovalStatus;
   approvedAt: string;
   approvedTotal: number | null;
+  declinedAt: string;
   subtotal: number;
   discountAmount: number;
   total: number;
@@ -563,6 +571,7 @@ type ApprovalPayload = {
   approval_status: ApprovalStatus;
   approved_at: string | null;
   approved_total: number | string | null;
+  declined_at: string | null;
   subtotal: number | string;
   discount_amount: number | string;
   total: number | string;
@@ -580,6 +589,7 @@ function mapApprovalPayload(data: unknown): ApprovalOrder | null {
     approvalStatus: row.approval_status,
     approvedAt: row.approved_at ?? "",
     approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
+    declinedAt: row.declined_at ?? "",
     subtotal: Number(row.subtotal),
     discountAmount: Number(row.discount_amount),
     total: Number(row.total),
@@ -605,9 +615,52 @@ export async function approveOrder(token: string, name: string): Promise<Approva
   return mapApprovalPayload(data);
 }
 
+/** Public, token-gated decline; only an order awaiting approval can be declined. */
+export async function declineOrder(token: string): Promise<ApprovalOrder | null> {
+  const { data, error } = await supabase.rpc("decline_order", { p_token: token });
+  throwIfError(error);
+  return mapApprovalPayload(data);
+}
+
 export async function savePushToken(ownerId: string, token: string): Promise<void> {
   const { error } = await supabase
     .from("admin_push_tokens")
     .upsert({ owner_id: ownerId, token }, { onConflict: "owner_id,token" });
   throwIfError(error);
+}
+
+export type ApprovalActivity = {
+  id: string;
+  number: string;
+  customer: string;
+  status: "pending" | "approved" | "declined";
+  approvedAt: string;
+  declinedAt: string;
+  approvedByName: string;
+  approvedTotal: number | null;
+  createdAt: string;
+};
+
+/** Orders waiting on, or already given, customer approval. Empty until the approval migration is applied. */
+export async function listApprovalActivity(): Promise<ApprovalActivity[]> {
+  const { data, error } = await supabase
+    .from("admin_orders")
+    .select("id,order_number,customer_name,approval_status,approved_at,declined_at,approved_by_name,approved_total,created_at,status")
+    .in("approval_status", ["pending", "approved", "declined"])
+    .neq("status", "Cancelled")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (isMissingPaymentColumn(error)) return [];
+  throwIfError(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    number: row.order_number,
+    customer: row.customer_name ?? "Customer",
+    status: row.approval_status as "pending" | "approved" | "declined",
+    approvedAt: row.approved_at ?? "",
+    declinedAt: row.declined_at ?? "",
+    approvedByName: row.approved_by_name ?? "",
+    approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
+    createdAt: row.created_at,
+  }));
 }

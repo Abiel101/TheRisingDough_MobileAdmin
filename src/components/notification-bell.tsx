@@ -27,7 +27,15 @@ export function NotificationBell() {
       onPress={() => router.push("/notifications")}
       style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >
-      <Text style={styles.glyph}>🔔</Text>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={styles.bell}
+      >
+        <View style={styles.bellBody} />
+        <View style={styles.bellBase} />
+        <View style={styles.bellClapper} />
+      </View>
       {count > 0 ? (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{count > 9 ? "9+" : count}</Text>
@@ -49,7 +57,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   pressed: { opacity: 0.72 },
-  glyph: { fontSize: 16 },
+  bell: {
+    width: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBody: {
+    position: "absolute",
+    top: 2,
+    width: 13,
+    height: 12,
+    borderTopWidth: 1.6,
+    borderLeftWidth: 1.6,
+    borderRightWidth: 1.6,
+    borderColor: colors.teal,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+  },
+  bellBase: {
+    position: "absolute",
+    top: 14,
+    width: 17,
+    borderTopWidth: 1.6,
+    borderColor: colors.teal,
+    borderRadius: 2,
+  },
+  bellClapper: {
+    position: "absolute",
+    top: 16,
+    width: 3,
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: colors.teal,
+  },
   badge: {
     position: "absolute",
     top: -4,

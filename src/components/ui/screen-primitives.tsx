@@ -49,7 +49,9 @@ export function ScreenHeader({
   return (
     <View style={styles.header}>
       <View style={styles.headerTop}>
-        <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
+        <View style={styles.headerCopy}>
+          <NativeText textStyle={styles.eyebrow}>THE RISING DOUGH</NativeText>
+        </View>
         <HeaderActions />
       </View>
       <NativeText textStyle={styles.title}>{title}</NativeText>
@@ -189,6 +191,7 @@ export const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
     paddingTop: spacing.xs,
+    paddingRight: spacing.md,
     marginBottom: spacing.sm,
   },
   headerActions: {

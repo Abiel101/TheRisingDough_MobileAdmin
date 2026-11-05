@@ -447,7 +447,7 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
 	screenContent: {
 		paddingHorizontal: spacing.lg,
-		paddingTop: spacing.md,
+		paddingTop: spacing.lg,
 		paddingBottom: spacing.lg,
 		gap: spacing.sm,
 	},

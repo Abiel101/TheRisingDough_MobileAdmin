@@ -9,6 +9,7 @@ import { LoadingSplash } from "@/components/loading-splash";
 import {
   Notifications,
   orderIdFromNotification,
+  requestIdFromNotification,
   registerForApprovalNotifications,
 } from "@/lib/notifications";
 import { colors } from "@/theme/tokens";
@@ -72,14 +73,19 @@ function RootNavigator() {
   useEffect(() => {
     if (!ownerId) return;
     registerForApprovalNotifications(ownerId).catch(() => undefined);
-    const openOrder = (response: Parameters<typeof orderIdFromNotification>[0]) => {
+    const openNotification = (response: Parameters<typeof orderIdFromNotification>[0]) => {
+      const requestId = requestIdFromNotification(response);
+      if (requestId) {
+        router.push({ pathname: "/request/[id]", params: { id: requestId } });
+        return;
+      }
       const orderId = orderIdFromNotification(response);
       if (orderId) router.push({ pathname: "/order/[id]", params: { id: orderId } });
     };
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) openOrder(response);
+      if (response) openNotification(response);
     });
-    const subscription = Notifications.addNotificationResponseReceivedListener(openOrder);
+    const subscription = Notifications.addNotificationResponseReceivedListener(openNotification);
     return () => subscription.remove();
   }, [ownerId]);
 

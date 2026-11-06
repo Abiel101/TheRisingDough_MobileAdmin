@@ -641,6 +641,63 @@ export type ApprovalActivity = {
   createdAt: string;
 };
 
+export type HolidayRequestActivity = {
+  id: string;
+  sourceOrderId: string;
+  number: string;
+  customer: string;
+  phone: string;
+  email: string;
+  dueDate: string;
+  notes: string;
+  requestedItems: { productName: string; quantity: number; unitPrice: number }[];
+  createdAt: string;
+  status: "pending" | "converted";
+  convertedOrderId: string | null;
+};
+
+/** Thanksgiving requests are separate from orders until an owner converts one. */
+export async function listHolidayRequestActivity(): Promise<HolidayRequestActivity[]> {
+  const { data, error } = await supabase
+    .from("admin_order_requests")
+    .select("id,source_order_id,source_order_number,customer_name,customer_phone,customer_email,due_date,request_notes,requested_items,created_at,status,converted_order_id")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  throwIfError(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    sourceOrderId: row.source_order_id,
+    number: row.source_order_number,
+    customer: row.customer_name ?? "Customer",
+    phone: row.customer_phone ?? "",
+    email: row.customer_email ?? "",
+    dueDate: row.due_date,
+    notes: row.request_notes ?? "",
+    requestedItems: Array.isArray(row.requested_items)
+      ? row.requested_items.flatMap((item: unknown) => {
+          if (!item || typeof item !== "object") return [];
+          const value = item as { productName?: unknown; quantity?: unknown; unitPrice?: unknown };
+          if (typeof value.productName !== "string" || !Number.isFinite(Number(value.quantity))) return [];
+          return [{ productName: value.productName, quantity: Number(value.quantity), unitPrice: Number(value.unitPrice) || 0 }];
+        })
+      : [],
+    createdAt: row.created_at,
+    status: row.status as "pending" | "converted",
+    convertedOrderId: row.converted_order_id ?? null,
+  }));
+}
+
+export async function markHolidayRequestConverted(requestId: string, orderId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("admin_order_requests")
+    .update({ status: "converted", converted_order_id: orderId })
+    .eq("id", requestId)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Request was not found for this account.");
+}
+
 /** Orders waiting on, or already given, customer approval. Empty until the approval migration is applied. */
 export async function listApprovalActivity(): Promise<ApprovalActivity[]> {
   const { data, error } = await supabase

@@ -33,6 +33,10 @@ export default function WorkspaceTabs() {
 				<NativeTabs.Trigger.Label>Orders</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="list.bullet.rectangle" md="receipt_long" />
 			</NativeTabs.Trigger>
+			<NativeTabs.Trigger name="requests">
+				<NativeTabs.Trigger.Label>Requests</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Icon sf="tray.and.arrow.down" md="move_to_inbox" />
+			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="catalog">
 				<NativeTabs.Trigger.Label>Catalog</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="square.grid.2x2" md="inventory_2" />

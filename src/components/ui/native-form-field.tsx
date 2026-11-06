@@ -25,10 +25,36 @@ type NativeFormFieldProps = {
   value?: string;
 };
 
+type NativeMultilineFormFieldProps = {
+  label: string;
+  onChangeText: RNTextInputProps["onChangeText"];
+  placeholder?: string;
+  value: string;
+};
+
 /** Uses Expo UI on Apple platforms and avoids its Compose Host on Android. */
 export function NativeFormField(props: NativeFormFieldProps) {
   if (Platform.OS === "android") return <AndroidFormField {...props} />;
   return <ExpoFormField {...props} />;
+}
+
+/** A cross-platform notes field with enough height to review longer request notes. */
+export function NativeMultilineFormField({ label, value, onChangeText, placeholder }: NativeMultilineFormFieldProps) {
+  return (
+    <View style={styles.field}>
+      <NativeText textStyle={styles.label}>{label}</NativeText>
+      <RNTextInput
+        multiline
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedText}
+        selectionColor={colors.teal}
+        textAlignVertical="top"
+        style={styles.multilineInput}
+        value={value}
+      />
+    </View>
+  );
 }
 
 function ExpoFormField({ label, value, onChangeText, trailingAction, ...inputProps }: NativeFormFieldProps) {
@@ -137,6 +163,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  multilineInput: {
+    minHeight: 112,
+    alignSelf: "stretch",
+    borderColor: colors.paper,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    backgroundColor: colors.card,
+    color: colors.espresso,
+    fontSize: 15,
+    lineHeight: 21,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
   },
   trailingAction: { minWidth: 54, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.sm },
   trailingActionText: { color: colors.teal, fontSize: 13, fontWeight: "700" },

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 
-import { countUnseenApprovals } from "@/lib/approval-inbox";
+import { countUnseenNotifications } from "@/lib/approval-inbox";
 import { colors } from "@/theme/tokens";
 
 const POLL_INTERVAL_MS = 30_000;
@@ -11,7 +11,7 @@ export function NotificationBell() {
   const [count, setCount] = useState(0);
 
   const refresh = useCallback(() => {
-    countUnseenApprovals().then(setCount, () => undefined);
+    countUnseenNotifications().then(setCount, () => undefined);
   }, []);
 
   useFocusEffect(refresh);

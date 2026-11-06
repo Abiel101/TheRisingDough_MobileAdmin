@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { useAuth } from "@/auth/auth-context";
 import { NativeButton } from "@/components/ui/native-button";
 import { SearchField } from "@/components/ui/design";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
-import { NativeFormField } from "@/components/ui/native-form-field";
+import { NativeFormField, NativeMultilineFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { allocateLineTotals, calculateOrderTotals, type DiscountType } from "@/domain/orders";
-import { addCustomer, createOrder, listCustomers, listProducts, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
+import { addCustomer, createOrder, listCustomers, listProducts, markHolidayRequestConverted, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -22,20 +22,55 @@ function localTodayKey() {
   return local.toISOString().slice(0, 10);
 }
 
+function parseRequestedItems(value?: string) {
+  if (!value) return [] as { productName: string; quantity: number }[];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item: unknown) => {
+      if (!item || typeof item !== "object") return [];
+      const requested = item as { productName?: unknown; quantity?: unknown };
+      if (typeof requested.productName !== "string" || !Number.isInteger(Number(requested.quantity))) return [];
+      return [{ productName: requested.productName, quantity: Math.max(0, Number(requested.quantity)) }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export default function NewOrderScreen() {
   const { session } = useAuth();
-  const { customerId: presetCustomerId } = useLocalSearchParams<{ customerId?: string }>();
+  const {
+    customerId: presetCustomerId,
+    requestId,
+    customerName: requestCustomerName,
+    customerPhone: requestCustomerPhone,
+    customerEmail: requestCustomerEmail,
+    dueDate: requestDueDate,
+    requestNotes,
+    requestItems,
+  } = useLocalSearchParams<{
+    customerId?: string;
+    requestId?: string;
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string;
+    dueDate?: string;
+    requestNotes?: string;
+    requestItems?: string;
+  }>();
+  const requestPrefilled = useRef(false);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [customerQuery, setCustomerQuery] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState(presetCustomerId ?? "");
-  const [showNewCustomer, setShowNewCustomer] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerPhone, setNewCustomerPhone] = useState("");
-  const [newCustomerEmail, setNewCustomerEmail] = useState("");
+  const [showNewCustomer, setShowNewCustomer] = useState(Boolean(requestId));
+  const [newCustomerName, setNewCustomerName] = useState(requestCustomerName ?? "");
+  const [newCustomerPhone, setNewCustomerPhone] = useState(requestCustomerPhone ?? "");
+  const [newCustomerEmail, setNewCustomerEmail] = useState(requestCustomerEmail ?? "");
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
-  const [dueDate, setDueDate] = useState(localTodayKey);
-  const [notes, setNotes] = useState("");
+  const [dueDate, setDueDate] = useState(requestDueDate || localTodayKey());
+  const [notes, setNotes] = useState(requestNotes ?? "");
   const [discountType, setDiscountType] = useState<DiscountType>("percent");
   const [discountInput, setDiscountInput] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -48,13 +83,44 @@ export default function NewOrderScreen() {
       const [nextCustomers, nextProducts] = await Promise.all([listCustomers(), listProducts()]);
       setCustomers(nextCustomers);
       setProducts(nextProducts);
+      if (!requestPrefilled.current) {
+        if (presetCustomerId) {
+          setSelectedCustomerId(presetCustomerId);
+        } else if (requestId) {
+          const phoneDigits = (requestCustomerPhone ?? "").replace(/\D/g, "");
+          const emailKey = (requestCustomerEmail ?? "").trim().toLocaleLowerCase();
+          const existing = nextCustomers.find((customer) =>
+            (phoneDigits && customer.phone.replace(/\D/g, "") === phoneDigits)
+            || (emailKey && customer.email.trim().toLocaleLowerCase() === emailKey),
+          );
+          if (existing) {
+            setSelectedCustomerId(existing.id);
+            setShowNewCustomer(false);
+          } else {
+            setNewCustomerName(requestCustomerName ?? "");
+            setNewCustomerPhone(requestCustomerPhone ?? "");
+            setNewCustomerEmail(requestCustomerEmail ?? "");
+            setShowNewCustomer(true);
+          }
+          if (requestDueDate) setDueDate(requestDueDate);
+          setNotes(requestNotes ?? "");
+          const requestedItems = parseRequestedItems(requestItems);
+          if (requestedItems.length) {
+            setQuantities(Object.fromEntries(requestedItems.flatMap((requested) => {
+              const product = nextProducts.find((item) => item.name.trim().toLocaleLowerCase() === requested.productName.trim().toLocaleLowerCase());
+              return product ? [[product.id, requested.quantity] as const] : [];
+            })));
+          }
+        }
+        requestPrefilled.current = true;
+      }
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load customers and catalog items.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [presetCustomerId, requestCustomerEmail, requestCustomerName, requestCustomerPhone, requestDueDate, requestId, requestItems, requestNotes]);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
 
@@ -124,6 +190,18 @@ export default function NewOrderScreen() {
     setError("");
     try {
       const id = await createOrder({ ownerId: session.user.id, customer: selectedCustomer, dueDate, notes, items: selectedItems, discount });
+      if (requestId) {
+        try {
+          await markHolidayRequestConverted(requestId, id);
+        } catch {
+          Alert.alert(
+            "Order created",
+            "The order is ready, but the original request could not be marked as started. You can still review the order and send its approval link.",
+            [{ text: "Open order", onPress: () => router.replace({ pathname: "/order/[id]", params: { id } }) }],
+          );
+          return;
+        }
+      }
       router.replace({ pathname: "/order/[id]", params: { id } });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create this order.");
@@ -201,7 +279,7 @@ export default function NewOrderScreen() {
             </View>
           );
         })}
-        <NativeFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
+        <NativeMultilineFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
       </ContentCard>
       <ContentCard style={styles.card}>
         <Text style={styles.sectionTitle}>Discount (optional)</Text>

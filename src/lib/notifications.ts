@@ -41,4 +41,9 @@ export function orderIdFromNotification(response: Notifications.NotificationResp
   return typeof orderId === "string" ? orderId : null;
 }
 
+export function requestIdFromNotification(response: Notifications.NotificationResponse): string | null {
+  const requestId = response.notification.request.content.data?.requestId;
+  return typeof requestId === "string" ? requestId : null;
+}
+
 export { Notifications };

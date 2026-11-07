@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
-import { allocateLineTotals, calculateOrderTotals, type PaymentMethod } from "@/domain/orders";
+import { allocateLineTotals, calculateOrderTotals, groupLinesByItem, hasOptionLabel, type PaymentMethod } from "@/domain/orders";
 import type { OrderRecord } from "@/lib/workspace";
 
 const money = (value: number) =>
@@ -42,6 +42,7 @@ export function buildInvoiceHtml(order: OrderRecord): string {
   const lineItems = order.items.map((item) => ({
     productId: item.productId,
     productName: item.name,
+    optionName: item.optionName,
     unitPrice: item.price,
     quantity: item.quantity,
   }));
@@ -52,18 +53,27 @@ export function buildInvoiceHtml(order: OrderRecord): string {
       ? `Discount (${order.discount.value}%)`
       : "Discount"
     : "";
-  const rows = order.items
-    .map((item, index) => {
-      const original = item.price * item.quantity;
-      const discounted = discountedTotals[index];
-      const isDiscounted = discounted < original;
-      return `<tr>
-        <td>${escapeHtml(item.name)}</td>
+  const lineRow = (index: number, label: string, indent: boolean) => {
+    const item = order.items[index];
+    const original = item.price * item.quantity;
+    const discounted = discountedTotals[index];
+    const isDiscounted = discounted < original;
+    return `<tr>
+        <td${indent ? ' class="option"' : ""}>${escapeHtml(label)}</td>
         <td class="num">${item.quantity}</td>
         <td class="num">${money(item.price)}</td>
         <td class="num">${isDiscounted ? `<span class="was">${money(original)}</span><br/><span class="sale">${money(discounted)}</span>` : money(original)}</td>
       </tr>`;
-    })
+  };
+  const rows = groupLinesByItem(order.items)
+    .map((group) =>
+      group.showOptions
+        ? `<tr class="group"><td colspan="4">${escapeHtml(group.name)}</td></tr>` +
+          group.entries
+            .map(({ line, index }) => lineRow(index, hasOptionLabel(line.optionName) ? line.optionName : "Default", true))
+            .join("")
+        : group.entries.map(({ index }) => lineRow(index, order.items[index].name, false)).join(""),
+    )
     .join("");
   const status = "PAID";
   const contact = [order.customerPhone, order.customerEmail, order.customerAddress]
@@ -84,6 +94,8 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     th { text-align: left; border-bottom: 2px solid #302017; padding: 8px 4px; }
     td { padding: 8px 4px; border-bottom: 1px solid #E9E4DA; }
     .num { text-align: right; }
+    .group td { font-weight: 700; border-bottom: none; padding-bottom: 2px; }
+    .option { padding-left: 20px; color: #4A3A2E; }
     .was { color: #82796C; text-decoration: line-through; font-size: 12px; }
     .sale { color: #D32F2F; font-weight: 700; }
     .pay { margin-top: 24px; font-size: 14px; border: 1px solid #E9E4DA; border-radius: 8px; padding: 12px; }

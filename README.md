@@ -17,6 +17,8 @@ The app reads `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_K
 
 Order payment status uses the additive migration in `supabase/migrations/20261009000000_add_order_payment_status.sql`. The `supabase/migrations/20261015072438_add_cancelled_order_status.sql` migration adds the Cancelled status to the admin order constraint.
 
+Catalog item options (for example Sourdough → Veggie, Bagels → Plain / Everything) use `supabase/migrations/20261107000000_catalog_item_options.sql`. It adds `admin_product_options`, stores each order line's `option_name` (existing lines become `Default`), and carries options through website requests and customer approval links. Items without options behave as before.
+
 Native sessions are stored with Expo SecureStore. The app reads the existing `admin_customer_list`, `admin_products`, `admin_orders`, and `admin_order_items` tables. It can add, edit, and delete customers; add and remove catalog items; create, edit, cancel, and delete orders; and add catalog items to existing orders. Deleting a customer keeps existing orders and their customer-name snapshot. Orders appear in Active, Completed, or Cancelled views; paid and fulfilled orders appear in Completed and are marked with green dots on the calendar. The calendar can show a compact month or week view.
 
 ## Project foundation

@@ -3,13 +3,14 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { useAuth } from "@/auth/auth-context";
+import { ItemPicker, lineQuantityKey, selectedItemsFromQuantities, type QuantityMap } from "@/components/item-picker";
 import { NativeButton } from "@/components/ui/native-button";
 import { SearchField } from "@/components/ui/design";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField, NativeMultilineFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { allocateLineTotals, calculateOrderTotals, type DiscountType } from "@/domain/orders";
-import { addCustomer, createOrder, listCustomers, listProducts, markHolidayRequestConverted, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
+import { allocateLineTotals, calculateOrderTotals, hasOptionLabel, matchRequestedItem, type DiscountType } from "@/domain/orders";
+import { addCustomer, createOrder, listCustomers, listProducts, markHolidayRequestConverted, optionUnitPrice, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -22,16 +23,23 @@ function localTodayKey() {
   return local.toISOString().slice(0, 10);
 }
 
-function parseRequestedItems(value?: string) {
-  if (!value) return [] as { productName: string; quantity: number }[];
+type RequestedItem = { productName: string; optionName?: string; sourceName?: string; quantity: number };
+
+function parseRequestedItems(value?: string): RequestedItem[] {
+  if (!value) return [];
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item: unknown) => {
       if (!item || typeof item !== "object") return [];
-      const requested = item as { productName?: unknown; quantity?: unknown };
+      const requested = item as { productName?: unknown; optionName?: unknown; sourceName?: unknown; quantity?: unknown };
       if (typeof requested.productName !== "string" || !Number.isInteger(Number(requested.quantity))) return [];
-      return [{ productName: requested.productName, quantity: Math.max(0, Number(requested.quantity)) }];
+      return [{
+        productName: requested.productName,
+        optionName: typeof requested.optionName === "string" ? requested.optionName : undefined,
+        sourceName: typeof requested.sourceName === "string" ? requested.sourceName : undefined,
+        quantity: Math.max(0, Number(requested.quantity)),
+      }];
     });
   } catch {
     return [];
@@ -73,7 +81,8 @@ export default function NewOrderScreen() {
   const [notes, setNotes] = useState(requestNotes ?? "");
   const [discountType, setDiscountType] = useState<DiscountType>("percent");
   const [discountInput, setDiscountInput] = useState("");
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [quantities, setQuantities] = useState<QuantityMap>({});
+  const [unmatchedItems, setUnmatchedItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -106,10 +115,21 @@ export default function NewOrderScreen() {
           setNotes(requestNotes ?? "");
           const requestedItems = parseRequestedItems(requestItems);
           if (requestedItems.length) {
-            setQuantities(Object.fromEntries(requestedItems.flatMap((requested) => {
-              const product = nextProducts.find((item) => item.name.trim().toLocaleLowerCase() === requested.productName.trim().toLocaleLowerCase());
-              return product ? [[product.id, requested.quantity] as const] : [];
-            })));
+            const matchedQuantities: QuantityMap = {};
+            const unmatched: string[] = [];
+            for (const requested of requestedItems) {
+              if (requested.quantity < 1) continue;
+              const match = matchRequestedItem(nextProducts, requested);
+              if (!match) {
+                const option = hasOptionLabel(requested.optionName) ? ` (${requested.optionName})` : "";
+                unmatched.push(`${requested.quantity} × ${requested.productName}${option}`);
+                continue;
+              }
+              const key = lineQuantityKey(match.product.id, match.option?.id);
+              matchedQuantities[key] = (matchedQuantities[key] ?? 0) + requested.quantity;
+            }
+            setQuantities(matchedQuantities);
+            setUnmatchedItems(unmatched);
           }
         }
         requestPrefilled.current = true;
@@ -130,22 +150,20 @@ export default function NewOrderScreen() {
   const matches = useMemo(() => query.length < 1 ? [] : customers.filter((customer) =>
     [customer.name, customer.phone, customer.email].some((value) => value.toLocaleLowerCase().includes(query)),
   ).slice(0, 6), [customers, query]);
-  const selectedItems = products.flatMap((product) => {
-    const quantity = quantities[product.id] ?? 0;
-    return quantity > 0 ? [{ product, quantity }] : [];
-  });
+  const selectedItems = selectedItemsFromQuantities(products, quantities);
 
   const discountValue = Math.round((Number(discountInput.replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
-  const lineItems = selectedItems.map(({ product, quantity }) => ({
+  const lineItems = selectedItems.map(({ product, option, quantity }) => ({
     productId: product.id,
     productName: product.name,
-    unitPrice: product.price,
+    optionName: option?.name,
+    unitPrice: optionUnitPrice(product, option),
     quantity,
   }));
   const discount = discountValue > 0 ? { type: discountType, value: discountValue } : null;
   const { subtotal, discountAmount, total } = calculateOrderTotals(lineItems, discount);
   const discountedLineTotals = allocateLineTotals(lineItems, discountAmount);
-  const discountedTotalByProduct = new Map(lineItems.map((item, index) => [item.productId, discountedLineTotals[index]]));
+  const discountedTotalByLine = new Map(selectedItems.map(({ product, option }, index) => [lineQuantityKey(product.id, option?.id), discountedLineTotals[index]]));
   const discountError =
     discountType === "percent" && discountValue > 100
       ? "A percentage discount can’t be more than 100%."
@@ -258,27 +276,20 @@ export default function NewOrderScreen() {
         <Text style={styles.sectionTitle}>Items</Text>
         {loading && !products.length ? <Text style={styles.hint}>Loading catalog…</Text> : null}
         {!loading && !products.length ? <Text style={styles.hint}>Add products in Catalog before creating an order.</Text> : null}
-        {products.map((product) => {
-          const quantity = quantities[product.id] ?? 0;
-          return (
-            <View key={product.id} style={styles.productRow}>
-              <View style={styles.customerCopy}>
-                <Text style={styles.customerName}>{product.name}</Text>
-                {quantity > 0 && discountAmount > 0 ? (
-                  <View style={styles.priceRow}>
-                    <Text style={styles.struck}>${(product.price * quantity).toFixed(2)}</Text>
-                    <Text style={styles.sale}>${(discountedTotalByProduct.get(product.id) ?? 0).toFixed(2)}</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.hint}>${product.price.toFixed(2)}</Text>
-                )}
-              </View>
-              <Pressable accessibilityLabel={`Remove one ${product.name}`} disabled={!quantity || saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: Math.max((current[product.id] ?? 0) - 1, 0) }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
-              <Text style={styles.quantityText}>{quantity}</Text>
-              <Pressable accessibilityLabel={`Add one ${product.name}`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
-            </View>
-          );
-        })}
+        {unmatchedItems.length ? (
+          <View style={styles.unmatched}>
+            <Text style={styles.unmatchedTitle}>Not matched to your catalog</Text>
+            {unmatchedItems.map((label) => <Text key={label} style={styles.hint}>{label}</Text>)}
+            <Text style={styles.hint}>Add the item or option in Catalog, or choose a similar one below.</Text>
+          </View>
+        ) : null}
+        <ItemPicker
+          discountedTotals={discountedTotalByLine}
+          disabled={saving}
+          onChange={(key, quantity) => setQuantities((current) => ({ ...current, [key]: quantity }))}
+          products={products}
+          quantities={quantities}
+        />
         <NativeMultilineFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
       </ContentCard>
       <ContentCard style={styles.card}>
@@ -350,14 +361,10 @@ const styles = StyleSheet.create({
   changeText: { color: colors.teal, fontSize: 13, fontWeight: "700" },
   customerResult: { gap: 3, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.parchment, padding: spacing.md },
   newCustomerForm: { gap: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.md },
-  productRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.xs },
-  quantityButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.parchment },
-  quantitySymbol: { color: colors.teal, fontSize: 19, fontWeight: "700" },
-  quantityText: { minWidth: 20, color: colors.espresso, textAlign: "center", fontWeight: "700" },
   priceRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
-  struck: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },
   struckBig: { color: colors.mutedText, fontSize: 15, textDecorationLine: "line-through" },
-  sale: { color: colors.sale, fontSize: 13, fontWeight: "700" },
+  unmatched: { gap: 3, borderRadius: 12, backgroundColor: "#F3E3B3", padding: spacing.md },
+  unmatchedTitle: { color: "#6B4E0A", fontSize: 13, fontWeight: "700" },
   errorText: { color: colors.brick, fontSize: 12 },
   chipRow: { flexDirection: "row", gap: spacing.sm },
   chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.card },

@@ -5,11 +5,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
-import { listProducts, type ProductRecord } from "@/lib/workspace";
+import { listProducts, productPriceRange, type ProductRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
+}
+
+function formatPrice(product: ProductRecord) {
+  const { min, max } = productPriceRange(product);
+  return min === max ? formatCurrency(min) : `${formatCurrency(min)} – ${formatCurrency(max)}`;
 }
 
 export default function CatalogScreen() {
@@ -38,7 +43,9 @@ export default function CatalogScreen() {
 
   const query = search.trim().toLocaleLowerCase();
   const visibleProducts = query
-    ? products.filter((product) => product.name.toLocaleLowerCase().includes(query))
+    ? products.filter((product) =>
+        [product.name, ...product.options.map((option) => option.name)].some((value) => value.toLocaleLowerCase().includes(query)),
+      )
     : products;
 
   const header = (
@@ -70,7 +77,7 @@ export default function CatalogScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
         renderItem={({ item, index }) => (
           <Pressable
-            accessibilityLabel={`View ${item.name} catalog details, ${formatCurrency(item.price)}`}
+            accessibilityLabel={`View ${item.name} catalog details, ${formatPrice(item)}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
             accessibilityRole="button"
             onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
             style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
@@ -78,7 +85,10 @@ export default function CatalogScreen() {
             <Avatar index={index} name={item.name} />
             <View style={styles.productCopy}>
               <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
-              <Text style={styles.productPrice}>{formatCurrency(item.price)}</Text>
+              {item.options.length ? (
+                <Text numberOfLines={2} style={styles.optionSummary}>{item.options.map((option) => option.name).join(" · ")}</Text>
+              ) : null}
+              <Text style={styles.productPrice}>{formatPrice(item)}</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
@@ -107,6 +117,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.76 },
   productCopy: { flex: 1, minWidth: 0, gap: 3 },
   productName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
+  optionSummary: { color: colors.mutedText, fontSize: 12, lineHeight: 16 },
   productPrice: { color: colors.mutedText, fontSize: 13 },
   chevron: { color: colors.teal, fontSize: 25, lineHeight: 26 },
 });

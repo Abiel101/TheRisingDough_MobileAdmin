@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { MessageCard } from "@/components/ui/screen-primitives";
-import { allocateLineTotals } from "@/domain/orders";
+import { allocateLineTotals, groupLinesByItem, hasOptionLabel } from "@/domain/orders";
 import { approveOrder, declineOrder, getOrderForApproval, type ApprovalOrder } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
@@ -106,6 +106,7 @@ export default function ApproveOrderScreen() {
     order.items.map((item) => ({
       productId: item.name,
       productName: item.name,
+      optionName: item.optionName,
       unitPrice: item.unitPrice,
       quantity: item.quantity,
     })),
@@ -151,24 +152,35 @@ export default function ApproveOrderScreen() {
             <Text style={[styles.columnLabel, styles.amountColumn]}>AMOUNT</Text>
           </View>
 
-          {order.items.map((item, index) => {
-            const original = item.unitPrice * item.quantity;
-            const discounted = discountedLineTotals[index] ?? original;
-            const hasDiscount = discounted < original;
-            return (
-              <View key={`${item.name}-${item.unitPrice}-${index}`} style={styles.itemRow}>
-                <View style={styles.itemColumn}>
-                  <Text style={styles.itemName}>{item.name}</Text>
+          {groupLinesByItem(order.items.map((item) => ({ ...item, productId: item.name }))).map((group) => (
+            <View key={group.key}>
+              {group.showOptions ? (
+                <View style={styles.groupRow}>
+                  <Text style={styles.itemName}>{group.name}</Text>
                 </View>
-                <Text style={[styles.quantity, styles.qtyColumn]}>{item.quantity}</Text>
-                <Text style={[styles.unitPrice, styles.unitColumn]}>{money(item.unitPrice)}</Text>
-                <View style={[styles.amountColumn, styles.amountCell]}>
-                  {hasDiscount ? <Text style={styles.wasPrice}>{money(original)}</Text> : null}
-                  <Text style={[styles.lineTotal, hasDiscount && styles.discountedPrice]}>{money(discounted)}</Text>
-                </View>
-              </View>
-            );
-          })}
+              ) : null}
+              {group.entries.map(({ line: item, index }) => {
+                const original = item.unitPrice * item.quantity;
+                const discounted = discountedLineTotals[index] ?? original;
+                const hasDiscount = discounted < original;
+                return (
+                  <View key={`${item.name}-${item.optionName}-${item.unitPrice}-${index}`} style={[styles.itemRow, group.showOptions && styles.optionRow]}>
+                    <View style={styles.itemColumn}>
+                      <Text style={group.showOptions ? styles.optionName : styles.itemName}>
+                        {group.showOptions ? (hasOptionLabel(item.optionName) ? item.optionName : "Default") : item.name}
+                      </Text>
+                    </View>
+                    <Text style={[styles.quantity, styles.qtyColumn]}>{item.quantity}</Text>
+                    <Text style={[styles.unitPrice, styles.unitColumn]}>{money(item.unitPrice)}</Text>
+                    <View style={[styles.amountColumn, styles.amountCell]}>
+                      {hasDiscount ? <Text style={styles.wasPrice}>{money(original)}</Text> : null}
+                      <Text style={[styles.lineTotal, hasDiscount && styles.discountedPrice]}>{money(discounted)}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
 
           <View style={styles.totals}>
             <View style={styles.totalRow}>
@@ -299,6 +311,9 @@ const styles = StyleSheet.create({
   amountColumn: { width: 73, textAlign: "right" },
   itemRow: { flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: spacing.xs, paddingHorizontal: spacing.xs, paddingVertical: spacing.md },
   itemName: { color: colors.espresso, fontSize: 12, fontWeight: "700" },
+  groupRow: { paddingHorizontal: spacing.xs, paddingTop: spacing.md, paddingBottom: 2 },
+  optionRow: { paddingVertical: spacing.sm, paddingLeft: spacing.md },
+  optionName: { color: colors.espresso, fontSize: 12, fontWeight: "600" },
   unitPrice: { color: colors.mutedText, fontSize: 11, textAlign: "right" },
   quantity: { color: colors.espresso, fontSize: 12, fontWeight: "700", textAlign: "center" },
   amountCell: { alignItems: "flex-end" },

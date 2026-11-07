@@ -1,5 +1,15 @@
 import { supabase } from "@/lib/supabase";
-import type { ApprovalStatus, Discount, DiscountType, OrderStatus, PaymentMethod } from "@/domain/orders";
+import {
+  DEFAULT_OPTION_NAME,
+  extractOptionName,
+  hasOptionLabel,
+  splitOptionFromName,
+  type ApprovalStatus,
+  type Discount,
+  type DiscountType,
+  type OrderStatus,
+  type PaymentMethod,
+} from "@/domain/orders";
 
 export type CustomerRecord = {
   id: string;
@@ -10,15 +20,31 @@ export type CustomerRecord = {
   createdAt: string;
 };
 
-export type ProductRecord = { id: string; name: string; price: number };
+/** `price` is null when the option uses the catalog item's own price. */
+export type ProductOption = { id: string; name: string; price: number | null };
+export type ProductRecord = { id: string; name: string; price: number; options: ProductOption[] };
 export type OrderLine = {
   id: string;
   productId: string;
   name: string;
+  optionId: string;
+  optionName: string;
   price: number;
   quantity: number;
 };
-export type OrderItemInput = { product: ProductRecord; quantity: number };
+export type OrderItemInput = { product: ProductRecord; option?: ProductOption | null; quantity: number };
+
+/** Lowest and highest price a customer can pay for an item across its options. */
+export function productPriceRange(product: ProductRecord): { min: number; max: number } {
+  const prices = product.options.length
+    ? product.options.map((option) => option.price ?? product.price)
+    : [product.price];
+  return { min: Math.min(...prices), max: Math.max(...prices) };
+}
+
+export function optionUnitPrice(product: ProductRecord, option?: ProductOption | null): number {
+  return option?.price ?? product.price;
+}
 export type OrderRecord = {
   id: string;
   number: string;
@@ -56,6 +82,13 @@ type CustomerRow = {
   created_at: string;
 };
 type ProductRow = { id: string; name: string; unit_price: number | string };
+type ProductOptionRow = {
+  id: string;
+  product_id: string;
+  name: string;
+  unit_price: number | string | null;
+  sort_order: number;
+};
 type OrderRow = {
   id: string;
   order_number: string;
@@ -82,7 +115,9 @@ type OrderItemRow = {
   id: string;
   order_id: string;
   catalog_product_id: string | null;
+  catalog_option_id?: string | null;
   item_name: string;
+  option_name?: string | null;
   unit_price: number | string;
   quantity: number;
 };
@@ -93,6 +128,43 @@ function throwIfError(error: { message: string } | null): void {
 
 function isMissingPaymentColumn(error: { code?: string } | null): boolean {
   return error?.code === "42703" || error?.code === "PGRST204";
+}
+
+// Options need the catalog-options migration; behave as "no options" until it is applied.
+function isMissingOptionsSchema(error: { code?: string } | null): boolean {
+  return error?.code === "42P01" || error?.code === "PGRST205" || isMissingPaymentColumn(error);
+}
+
+function mapOption(row: ProductOptionRow): ProductOption {
+  return { id: row.id, name: row.name, price: row.unit_price == null ? null : Number(row.unit_price) };
+}
+
+function mapProduct(row: ProductRow, options: ProductOption[] = []): ProductRecord {
+  return { id: row.id, name: row.name, price: Number(row.unit_price), options };
+}
+
+async function listOptionRows(productIds?: string[]): Promise<ProductOptionRow[]> {
+  let query = supabase
+    .from("admin_product_options")
+    .select("id,product_id,name,unit_price,sort_order")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(2000);
+  if (productIds) query = query.in("product_id", productIds);
+  const { data, error } = await query;
+  if (isMissingOptionsSchema(error)) return [];
+  throwIfError(error);
+  return (data ?? []) as ProductOptionRow[];
+}
+
+function groupOptions(rows: ProductOptionRow[]): Map<string, ProductOption[]> {
+  const byProduct = new Map<string, ProductOption[]>();
+  for (const row of rows) {
+    const options = byProduct.get(row.product_id) ?? [];
+    options.push(mapOption(row));
+    byProduct.set(row.product_id, options);
+  }
+  return byProduct;
 }
 
 function mapCustomer(row: CustomerRow): CustomerRecord {
@@ -188,17 +260,13 @@ export async function addCustomer(
 }
 
 export async function listProducts(): Promise<ProductRecord[]> {
-  const { data, error } = await supabase
-    .from("admin_products")
-    .select("id,name,unit_price")
-    .order("name", { ascending: true })
-    .limit(500);
+  const [{ data, error }, optionRows] = await Promise.all([
+    supabase.from("admin_products").select("id,name,unit_price").order("name", { ascending: true }).limit(500),
+    listOptionRows(),
+  ]);
   throwIfError(error);
-  return ((data ?? []) as ProductRow[]).map((row) => ({
-    id: row.id,
-    name: row.name,
-    price: Number(row.unit_price),
-  }));
+  const optionsByProduct = groupOptions(optionRows);
+  return ((data ?? []) as ProductRow[]).map((row) => mapProduct(row, optionsByProduct.get(row.id)));
 }
 
 export async function getProduct(id: string): Promise<ProductRecord | null> {
@@ -209,15 +277,62 @@ export async function getProduct(id: string): Promise<ProductRecord | null> {
     .maybeSingle();
   throwIfError(error);
   if (!data) return null;
-  const row = data as ProductRow;
-  return { id: row.id, name: row.name, price: Number(row.unit_price) };
+  const optionRows = await listOptionRows([id]);
+  return mapProduct(data as ProductRow, groupOptions(optionRows).get(id));
+}
+
+export type ProductOptionInput = { name: string; price: number | null };
+
+function cleanOptionInputs(options: ProductOptionInput[]): ProductOptionInput[] {
+  const seen = new Set<string>();
+  const cleaned: ProductOptionInput[] = [];
+  for (const option of options) {
+    const name = option.name.trim().replace(/\s+/g, " ");
+    const key = name.toLocaleLowerCase();
+    if (!name) continue;
+    if (!hasOptionLabel(name)) throw new Error(`“${name}” is reserved. Choose a different option name.`);
+    if (seen.has(key)) throw new Error(`“${name}” is listed more than once.`);
+    if (option.price != null && (!Number.isFinite(option.price) || option.price < 0)) {
+      throw new Error(`Enter a price of zero or more for “${name}”.`);
+    }
+    seen.add(key);
+    cleaned.push({ name, price: option.price });
+  }
+  return cleaned;
+}
+
+export async function addProductOption(
+  ownerId: string,
+  productId: string,
+  input: ProductOptionInput,
+  sortOrder = 0,
+): Promise<ProductOption> {
+  const [option] = cleanOptionInputs([input]);
+  if (!option) throw new Error("Enter an option name.");
+  const { data, error } = await supabase
+    .from("admin_product_options")
+    .insert({ owner_id: ownerId, product_id: productId, name: option.name, unit_price: option.price, sort_order: sortOrder })
+    .select("id,product_id,name,unit_price,sort_order")
+    .single();
+  if (error?.code === "23505") throw new Error(`“${option.name}” is already an option for this item.`);
+  if (isMissingOptionsSchema(error)) throw new Error("Item options aren’t available yet. Apply the latest Supabase migration first.");
+  throwIfError(error);
+  if (!data) throw new Error("Supabase returned no option.");
+  return mapOption(data as ProductOptionRow);
+}
+
+export async function removeProductOption(id: string): Promise<void> {
+  const { error } = await supabase.from("admin_product_options").delete().eq("id", id);
+  throwIfError(error);
 }
 
 export async function addProduct(
   ownerId: string,
   name: string,
   price: number,
+  options: ProductOptionInput[] = [],
 ): Promise<ProductRecord> {
+  const cleaned = cleanOptionInputs(options);
   const { data, error } = await supabase
     .from("admin_products")
     .insert({ owner_id: ownerId, name: name.trim(), unit_price: price })
@@ -226,7 +341,24 @@ export async function addProduct(
   throwIfError(error);
   if (!data) throw new Error("Supabase returned no catalog item.");
   const row = data as ProductRow;
-  return { id: row.id, name: row.name, price: Number(row.unit_price) };
+  if (!cleaned.length) return mapProduct(row);
+
+  const { data: optionData, error: optionError } = await supabase
+    .from("admin_product_options")
+    .insert(cleaned.map((option, index) => ({
+      owner_id: ownerId,
+      product_id: row.id,
+      name: option.name,
+      unit_price: option.price,
+      sort_order: index,
+    })))
+    .select("id,product_id,name,unit_price,sort_order");
+  if (optionError) {
+    await supabase.from("admin_products").delete().eq("id", row.id);
+    if (isMissingOptionsSchema(optionError)) throw new Error("Item options aren’t available yet. Apply the latest Supabase migration first.");
+    throwIfError(optionError);
+  }
+  return mapProduct(row, ((optionData ?? []) as ProductOptionRow[]).map(mapOption));
 }
 
 export async function removeProduct(id: string): Promise<void> {
@@ -287,6 +419,16 @@ export async function getOrder(id: string): Promise<OrderRecord | null> {
   return orders[0] ?? null;
 }
 
+const baseItemColumns = "id,order_id,catalog_product_id,item_name,unit_price,quantity";
+
+async function selectOrderItemRows(orderIds: string[]) {
+  const query = (columns: string) =>
+    supabase.from("admin_order_items").select(columns).in("order_id", orderIds).limit(2000);
+  const result = await query(`${baseItemColumns},catalog_option_id,option_name`);
+  if (!isMissingPaymentColumn(result.error)) return result;
+  return query(baseItemColumns);
+}
+
 async function mapOrderRows(
   orderRows: OrderRow[],
   { paymentTrackingAvailable, approvalAvailable }: OrderFeatures,
@@ -297,11 +439,7 @@ async function mapOrderRows(
     ...new Set(orderRows.flatMap((row) => (row.customer_id ? [row.customer_id] : []))),
   ];
   const [itemResult, customerResult] = await Promise.all([
-    supabase
-      .from("admin_order_items")
-      .select("id,order_id,catalog_product_id,item_name,unit_price,quantity")
-      .in("order_id", orderIds)
-      .limit(2000),
+    selectOrderItemRows(orderIds),
     customerIds.length
       ? supabase
           .from("admin_customer_list")
@@ -316,12 +454,14 @@ async function mapOrderRows(
     ((customerResult.data ?? []) as CustomerRow[]).map((row) => [row.id, mapCustomer(row)]),
   );
   const itemsByOrder = new Map<string, OrderLine[]>();
-  for (const row of (itemResult.data ?? []) as OrderItemRow[]) {
+  for (const row of (itemResult.data ?? []) as unknown as OrderItemRow[]) {
     const lines = itemsByOrder.get(row.order_id) ?? [];
     lines.push({
       id: row.id,
       productId: row.catalog_product_id ?? "",
       name: row.item_name,
+      optionId: row.catalog_option_id ?? "",
+      optionName: row.option_name?.trim() || DEFAULT_OPTION_NAME,
       price: Number(row.unit_price),
       quantity: row.quantity,
     });
@@ -432,18 +572,35 @@ function validateOrderItems(items: OrderItemInput[]) {
 }
 
 async function insertOrderItems(ownerId: string, orderId: string, items: OrderItemInput[]) {
+  const rows = items.map(({ product, option, quantity }) => ({
+    owner_id: ownerId,
+    order_id: orderId,
+    catalog_product_id: product.id,
+    item_name: product.name,
+    unit_price: optionUnitPrice(product, option),
+    quantity,
+  }));
   const { error } = await supabase.from("admin_order_items").insert(
-    items.map(({ product, quantity }) => ({
-      owner_id: ownerId,
-      order_id: orderId,
-      catalog_product_id: product.id,
-      item_name: product.name,
-      unit_price: product.price,
-      quantity,
+    rows.map((row, index) => ({
+      ...row,
+      catalog_option_id: items[index].option?.id ?? null,
+      option_name: items[index].option?.name ?? DEFAULT_OPTION_NAME,
     })),
   );
-  throwIfError(error);
+  if (!isMissingPaymentColumn(error)) {
+    throwIfError(error);
+    return;
+  }
+  // Options migration not applied yet: only plain items can be saved.
+  if (items.some(({ option }) => option)) {
+    throw new Error("Item options aren’t available yet. Apply the latest Supabase migration first.");
+  }
+  const { error: fallbackError } = await supabase.from("admin_order_items").insert(rows);
+  throwIfError(fallbackError);
 }
+
+const lineKey = (productId: string | null, optionName: string | null | undefined, price: number | string) =>
+  `${productId ?? ""}:${(optionName?.trim() || DEFAULT_OPTION_NAME).toLocaleLowerCase()}:${Number(price)}`;
 
 export async function createOrder(input: {
   ownerId: string;
@@ -496,22 +653,23 @@ export async function addItemsToOrder(
   items: OrderItemInput[],
 ): Promise<void> {
   validateOrderItems(items);
-  const { data, error } = await supabase
-    .from("admin_order_items")
-    .select("id,catalog_product_id,unit_price,quantity")
-    .eq("order_id", orderId);
+  const query = (columns: string) =>
+    supabase.from("admin_order_items").select(columns).eq("order_id", orderId);
+  let { data, error } = await query("id,catalog_product_id,option_name,unit_price,quantity");
+  if (isMissingPaymentColumn(error)) ({ data, error } = await query("id,catalog_product_id,unit_price,quantity"));
   throwIfError(error);
-  const current = (data ?? []) as {
+  const current = (data ?? []) as unknown as {
     id: string;
     catalog_product_id: string | null;
+    option_name?: string | null;
     unit_price: number | string;
     quantity: number;
   }[];
-  const nextItems = new Map(current.map((item) => [`${item.catalog_product_id ?? ""}:${Number(item.unit_price)}`, item]));
+  const nextItems = new Map(current.map((item) => [lineKey(item.catalog_product_id, item.option_name, item.unit_price), item]));
   const newItems: OrderItemInput[] = [];
 
   for (const input of items) {
-    const key = `${input.product.id}:${input.product.price}`;
+    const key = lineKey(input.product.id, input.option?.name, optionUnitPrice(input.product, input.option));
     const existing = nextItems.get(key);
     if (!existing) {
       newItems.push(input);
@@ -560,7 +718,7 @@ export type ApprovalOrder = {
   subtotal: number;
   discountAmount: number;
   total: number;
-  items: { name: string; unitPrice: number; quantity: number }[];
+  items: { name: string; optionName: string; unitPrice: number; quantity: number }[];
 };
 
 type ApprovalPayload = {
@@ -575,7 +733,7 @@ type ApprovalPayload = {
   subtotal: number | string;
   discount_amount: number | string;
   total: number | string;
-  items: { name: string; unit_price: number | string; quantity: number }[];
+  items: { name: string; option_name?: string | null; unit_price: number | string; quantity: number }[];
 };
 
 function mapApprovalPayload(data: unknown): ApprovalOrder | null {
@@ -595,6 +753,7 @@ function mapApprovalPayload(data: unknown): ApprovalOrder | null {
     total: Number(row.total),
     items: row.items.map((item) => ({
       name: item.name,
+      optionName: item.option_name?.trim() || DEFAULT_OPTION_NAME,
       unitPrice: Number(item.unit_price),
       quantity: item.quantity,
     })),
@@ -650,7 +809,7 @@ export type HolidayRequestActivity = {
   email: string;
   dueDate: string;
   notes: string;
-  requestedItems: { productName: string; quantity: number; unitPrice: number }[];
+  requestedItems: { productName: string; optionName: string; sourceName: string; quantity: number; unitPrice: number }[];
   createdAt: string;
   status: "pending" | "converted";
   convertedOrderId: string | null;
@@ -676,9 +835,17 @@ export async function listHolidayRequestActivity(): Promise<HolidayRequestActivi
     requestedItems: Array.isArray(row.requested_items)
       ? row.requested_items.flatMap((item: unknown) => {
           if (!item || typeof item !== "object") return [];
-          const value = item as { productName?: unknown; quantity?: unknown; unitPrice?: unknown };
+          const value = item as { productName?: unknown; optionName?: unknown; quantity?: unknown; unitPrice?: unknown };
           if (typeof value.productName !== "string" || !Number.isFinite(Number(value.quantity))) return [];
-          return [{ productName: value.productName, quantity: Number(value.quantity), unitPrice: Number(value.unitPrice) || 0 }];
+          const rawOption = extractOptionName((item as { raw?: unknown }).raw);
+          const savedOption = hasOptionLabel(typeof value.optionName === "string" ? value.optionName : "")
+            ? (value.optionName as string).trim()
+            : rawOption;
+          // Website names like "Sourdough - Veggie" carry the option in the text when no option was saved.
+          const { productName, optionName } = hasOptionLabel(savedOption)
+            ? { productName: value.productName.trim(), optionName: savedOption }
+            : splitOptionFromName(value.productName);
+          return [{ productName, optionName, sourceName: value.productName.trim(), quantity: Number(value.quantity), unitPrice: Number(value.unitPrice) || 0 }];
         })
       : [],
     createdAt: row.created_at,

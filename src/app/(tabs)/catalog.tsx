@@ -6,12 +6,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
+<<<<<<< HEAD
 import { getCatalogPromotion, listProducts, type ProductRecord } from "@/lib/workspace";
 import { DEFAULT_CATALOG_PROMOTION, getCatalogUnitPriceCents, type CatalogPromotion } from "@/domain/catalog-pricing";
+=======
+import { listProducts, productPriceRange, type ProductRecord } from "@/lib/workspace";
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
+}
+
+function formatPrice(product: ProductRecord) {
+  const { min, max } = productPriceRange(product);
+  return min === max ? formatCurrency(min) : `${formatCurrency(min)} – ${formatCurrency(max)}`;
 }
 
 export default function CatalogScreen() {
@@ -42,7 +51,9 @@ export default function CatalogScreen() {
 
   const query = search.trim().toLocaleLowerCase();
   const visibleProducts = query
-    ? products.filter((product) => product.name.toLocaleLowerCase().includes(query))
+    ? products.filter((product) =>
+        [product.name, ...product.options.map((option) => option.name)].some((value) => value.toLocaleLowerCase().includes(query)),
+      )
     : products;
 
   const header = (
@@ -81,7 +92,7 @@ export default function CatalogScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
         renderItem={({ item, index }) => (
           <Pressable
-            accessibilityLabel={`View ${item.name} catalog details, ${formatCurrency(item.price)}`}
+            accessibilityLabel={`View ${item.name} catalog details, ${formatPrice(item)}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
             accessibilityRole="button"
             onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
             style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
@@ -89,6 +100,7 @@ export default function CatalogScreen() {
             <Avatar index={index} name={item.name} />
             <View style={styles.productCopy}>
               <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
+<<<<<<< HEAD
               {(() => {
                 const currentCents = getCatalogUnitPriceCents(item.price, item.discount, promotion ?? DEFAULT_CATALOG_PROMOTION);
                 const currentPrice = currentCents / 100;
@@ -101,6 +113,12 @@ export default function CatalogScreen() {
                 );
               })()}
               {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
+=======
+              {item.options.length ? (
+                <Text numberOfLines={2} style={styles.optionSummary}>{item.options.map((option) => option.name).join(" · ")}</Text>
+              ) : null}
+              <Text style={styles.productPrice}>{formatPrice(item)}</Text>
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
             </View>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
@@ -128,6 +146,7 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.76 },
   productCopy: { flex: 1, minWidth: 0, gap: 3 },
+<<<<<<< HEAD
   productName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   productPrice: { color: colors.mutedText, fontSize: 12 },
   priceRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: spacing.xs },
@@ -137,5 +156,10 @@ const styles = StyleSheet.create({
   promotionButton: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.teal, backgroundColor: colors.card, padding: spacing.md },
   promotionTitle: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   promotionCopy: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
+=======
+  productName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
+  optionSummary: { color: colors.mutedText, fontSize: 12, lineHeight: 16 },
+  productPrice: { color: colors.mutedText, fontSize: 13 },
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   chevron: { color: colors.teal, fontSize: 25, lineHeight: 26 },
 });

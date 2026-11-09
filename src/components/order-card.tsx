@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { Pressable } from "@/components/ui/pressable";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 
-import { calculateOrderTotals, orderStatuses, orderStatusLabels, resolveStatus, type OrderStatus } from "@/domain/orders";
+import { calculateOrderTotals, groupLinesByItem, orderStatuses, orderStatusLabels, resolveStatus, summarizeLineGroup, type OrderStatus } from "@/domain/orders";
 import { updateOrder, type OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -49,13 +49,15 @@ export function OrderCard({
     order.items.map((item) => ({
       productId: item.productId,
       productName: item.name,
+      optionName: item.optionName,
       unitPrice: item.price,
       quantity: item.quantity,
     })),
     order.discount,
   );
   const itemCount = order.items.reduce((count, item) => count + item.quantity, 0);
-  const previewItems = order.items.slice(0, 2);
+  const itemGroups = groupLinesByItem(order.items);
+  const previewItems = itemGroups.slice(0, 2);
 
   const card = (
     <Pressable
@@ -81,13 +83,13 @@ export function OrderCard({
       </View>
       {previewItems.length ? (
         <View style={styles.items}>
-          {previewItems.map((item) => (
-            <Text key={`${item.productId}-${item.name}`} numberOfLines={1} style={styles.itemText}>
-              {item.quantity} × {item.name}
+          {previewItems.map((group) => (
+            <Text key={group.key} numberOfLines={2} style={styles.itemText}>
+              {summarizeLineGroup(group)}
             </Text>
           ))}
-          {order.items.length > previewItems.length ? (
-            <Text style={styles.moreItems}>+ {order.items.length - previewItems.length} more items</Text>
+          {itemGroups.length > previewItems.length ? (
+            <Text style={styles.moreItems}>+ {itemGroups.length - previewItems.length} more items</Text>
           ) : null}
         </View>
       ) : null}

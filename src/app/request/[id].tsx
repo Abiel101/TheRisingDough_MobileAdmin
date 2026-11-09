@@ -2,11 +2,16 @@ import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
+import { groupLinesByItem, hasOptionLabel } from "@/domain/orders";
 import { NativeButton } from "@/components/ui/native-button";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { markRequestRead } from "@/lib/approval-inbox";
 import { listHolidayRequestActivity, type HolidayRequestActivity } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
+}
 
 function formatDate(date: string) {
   return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
@@ -74,11 +79,24 @@ export default function RequestDetailScreen() {
 
         <ContentCard style={styles.card}>
           <Text style={styles.sectionTitle}>Requested items</Text>
-          {request.requestedItems.length ? request.requestedItems.map((item, index) => (
-            <View key={`${item.productName}-${index}`} style={styles.itemRow}>
-              <Text style={styles.itemQuantity}>{item.quantity}×</Text>
-              <Text style={styles.itemName}>{item.productName}</Text>
-            </View>
+          {request.requestedItems.length ? groupLinesByItem(request.requestedItems.map((item) => ({ ...item, name: item.productName }))).map((group) => (
+            group.showOptions ? (
+              <View key={group.key} style={styles.group}>
+                <Text style={styles.itemName}>{group.name}</Text>
+                {group.entries.map(({ line }, index) => (
+                  <View key={`${line.optionName}-${index}`} style={styles.optionRow}>
+                    <Text style={styles.optionName}>{hasOptionLabel(line.optionName) ? line.optionName : "Default"}</Text>
+                    <Text style={styles.itemQuantity}>{line.quantity}×</Text>
+                    <Text style={styles.itemPrice}>{line.unitPrice > 0 ? formatCurrency(line.unitPrice * line.quantity) : ""}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : group.entries.map(({ line }, index) => (
+              <View key={`${line.productName}-${index}`} style={styles.itemRow}>
+                <Text style={styles.itemQuantity}>{line.quantity}×</Text>
+                <Text style={styles.itemName}>{line.productName}</Text>
+              </View>
+            ))
           )) : <Text style={styles.meta}>This request was submitted before the website item picker was added.</Text>}
           <View style={styles.divider} />
           <Text style={styles.fieldLabel}>{request.requestedItems.length ? "Additional notes" : "Original request notes"}</Text>
@@ -116,5 +134,9 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.xs },
   itemRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
   itemQuantity: { minWidth: 34, color: colors.teal, fontSize: 14, fontWeight: "800" },
+  group: { gap: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
+  optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.cream, paddingLeft: spacing.md },
+  optionName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
+  itemPrice: { minWidth: 64, color: colors.espresso, fontSize: 14, fontWeight: "700", textAlign: "right" },
   itemName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
 });

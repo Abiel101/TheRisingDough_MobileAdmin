@@ -29,7 +29,9 @@ import {
   type OrderStatus,
   type PaymentMethod,
 } from "@/domain/orders";
+import { ItemPicker, selectedItemsFromQuantities } from "@/components/item-picker";
 import { formatDate } from "@/components/order-card";
+import { OrderLines } from "@/components/order-lines";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { canInvoice, shareInvoicePdf } from "@/lib/invoice";
 import { NativeIcon } from "@/components/ui/native-icon";
@@ -201,10 +203,7 @@ export default function OrderDetailScreen() {
 
   async function handleAddItems() {
     if (!order || !session?.user.id) return;
-    const items = products.flatMap((product) => {
-      const quantity = itemQuantities[product.id] ?? 0;
-      return quantity > 0 ? [{ product, quantity }] : [];
-    });
+    const items = selectedItemsFromQuantities(products, itemQuantities);
     if (!items.length) return;
     const ownerId = session.user.id;
     if (await run(async () => {
@@ -336,6 +335,7 @@ export default function OrderDetailScreen() {
   const lineItems = order.items.map((item) => ({
     productId: item.productId,
     productName: item.name,
+    optionName: item.optionName,
     unitPrice: item.price,
     quantity: item.quantity,
   }));
@@ -505,36 +505,14 @@ export default function OrderDetailScreen() {
             <Text style={styles.sectionTitle}>Items</Text>
             <Text style={styles.muted}>{itemCount} total</Text>
           </View>
-          {order.items.length ? order.items.map((item) => (
-            <View key={item.id} style={styles.itemRow}>
-              <View style={styles.qtyBadge}>
-                <Text style={styles.qtyBadgeText}>{item.quantity}×</Text>
-              </View>
-              <View style={styles.itemCopy}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.muted}>{formatCurrency(item.price)} each</Text>
-              </View>
-              {discountedLineTotals[order.items.indexOf(item)] < item.quantity * item.price ? (
-                <View style={styles.itemTotals}>
-                  <Text style={styles.struck}>{formatCurrency(item.quantity * item.price)}</Text>
-                  <Text style={styles.saleText}>{formatCurrency(discountedLineTotals[order.items.indexOf(item)])}</Text>
-                </View>
-              ) : (
-                <Text style={styles.itemTotal}>{formatCurrency(item.quantity * item.price)}</Text>
-              )}
-              {canRemoveItems ? (
-                <Pressable
-                  accessibilityLabel={`Remove ${item.name}`}
-                  accessibilityRole="button"
-                  disabled={saving}
-                  onPress={() => removeItem(item.id)}
-                  style={styles.removeItemButton}
-                >
-                  <NativeIcon color={colors.brick} name="close" size={14} />
-                </Pressable>
-              ) : null}
-            </View>
-          )) : <Text style={styles.muted}>No item details were saved with this order.</Text>}
+          {order.items.length ? (
+            <OrderLines
+              discountedTotals={discountedLineTotals}
+              items={order.items}
+              onRemove={canRemoveItems ? (line) => removeItem(line.id) : undefined}
+              removeDisabled={saving}
+            />
+          ) : <Text style={styles.muted}>No item details were saved with this order.</Text>}
         </View>
 
         {discountAmount > 0 ? (
@@ -673,34 +651,12 @@ export default function OrderDetailScreen() {
                 <Text style={styles.muted}>Tap to collapse</Text>
               </View>
             </Pressable>
-            {products.map((product) => {
-              const quantity = itemQuantities[product.id] ?? 0;
-              return (
-                <View key={product.id} style={styles.productRow}>
-                  <View style={styles.itemCopy}>
-                    <Text style={styles.itemName}>{product.name}</Text>
-                    <Text style={styles.muted}>{formatCurrency(product.price)}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityLabel={`Remove one ${product.name}`}
-                    disabled={!quantity || saving}
-                    onPress={() => setItemQuantities((current) => ({ ...current, [product.id]: Math.max((current[product.id] ?? 0) - 1, 0) }))}
-                    style={styles.quantityButton}
-                  >
-                    <Text style={styles.quantitySymbol}>−</Text>
-                  </Pressable>
-                  <Text style={styles.quantityText}>{quantity}</Text>
-                  <Pressable
-                    accessibilityLabel={`Add one ${product.name}`}
-                    disabled={saving}
-                    onPress={() => setItemQuantities((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))}
-                    style={styles.quantityButton}
-                  >
-                    <Text style={styles.quantitySymbol}>+</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
+            <ItemPicker
+              disabled={saving}
+              onChange={(key, quantity) => setItemQuantities((current) => ({ ...current, [key]: quantity }))}
+              products={products}
+              quantities={itemQuantities}
+            />
             <Pressable
               accessibilityRole="button"
               disabled={saving || !hasSelection}
@@ -914,6 +870,7 @@ const styles = StyleSheet.create({
   infoValue: { flex: 1, color: colors.mutedText, fontSize: 12, textAlign: "right" },
   infoValueStrong: { color: colors.espresso, fontWeight: "700" },
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+<<<<<<< HEAD
   sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 16, fontWeight: "700" },
   muted: { color: colors.mutedText, fontSize: 11, lineHeight: 16 },
   hint: { color: "#4A6FA5", fontSize: 11, lineHeight: 16 },
@@ -926,9 +883,15 @@ const styles = StyleSheet.create({
   itemTotals: { alignItems: "flex-end" },
   struck: { color: colors.mutedText, fontSize: 11, textDecorationLine: "line-through" },
   saleText: { color: colors.sale, fontSize: 13, fontWeight: "700" },
+=======
+  sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 18, fontWeight: "800" },
+  muted: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
+  hint: { color: "#4A6FA5", fontSize: 12, lineHeight: 17 },
+  itemCopy: { flex: 1, gap: 2 },
+  saleText: { color: colors.sale, fontSize: 14, fontWeight: "700" },
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   linkBox: { gap: spacing.sm, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.parchment, padding: spacing.md },
   linkText: { color: colors.espresso, fontSize: 12, lineHeight: 17 },
-  removeItemButton: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.parchment },
   removeItemText: { color: colors.brick, fontSize: 12, fontWeight: "700" },
   chipRow: { flexDirection: "row", gap: spacing.sm },
   chip: { minHeight: 38, justifyContent: "center", borderColor: colors.border, borderWidth: 1, borderRadius: 999, backgroundColor: colors.card, paddingHorizontal: spacing.lg },
@@ -942,10 +905,6 @@ const styles = StyleSheet.create({
   addPlus: { color: colors.teal, fontSize: 20, fontWeight: "700" },
   addTitle: { color: colors.teal, fontSize: 14, fontWeight: "700" },
   addTextDisabled: { color: colors.mutedText },
-  productRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingVertical: spacing.xs },
-  quantityButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.card },
-  quantitySymbol: { color: colors.teal, fontSize: 18, fontWeight: "700" },
-  quantityText: { minWidth: 18, color: colors.espresso, textAlign: "center", fontWeight: "700" },
   footer: { flexDirection: "row", gap: spacing.md, borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: colors.background, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   footerFlex: { flex: 1 },
   footerOutline: { flex: 1, minHeight: 50, alignItems: "center", justifyContent: "center", borderColor: colors.teal, borderWidth: 1.5, borderRadius: 14, backgroundColor: colors.card },

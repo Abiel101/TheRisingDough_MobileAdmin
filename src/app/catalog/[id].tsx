@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
+<<<<<<< HEAD
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { Pressable } from "@/components/ui/pressable";
+=======
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 import { router, useLocalSearchParams } from "expo-router";
 
+import { useAuth } from "@/auth/auth-context";
+import { OptionAddForm } from "@/components/option-add-form";
 import { NativeButton } from "@/components/ui/native-button";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
+<<<<<<< HEAD
 import { getProduct, removeProduct, updateProductPricing, type ProductRecord } from "@/lib/workspace";
 import type { CatalogPriceOption, ProductDiscountType } from "@/domain/catalog-pricing";
+=======
+import { addProductOption, getProduct, removeProduct, removeProductOption, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -19,6 +29,7 @@ type PricingOptionDraft = CatalogPriceOption & { packSizeInput: string; priceInp
 export default function CatalogItemDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const { session } = useAuth();
   const [product, setProduct] = useState<ProductRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState(false);
@@ -68,6 +79,33 @@ export default function CatalogItemDetailScreen() {
         { text: "Remove", style: "destructive", onPress: () => void handleRemove() },
       ],
     );
+  }
+
+  async function handleAddOption(input: ProductOptionInput) {
+    if (!product || !session?.user.id) return;
+    const option = await addProductOption(session.user.id, product.id, input, product.options.length);
+    setProduct((current) => (current ? { ...current, options: [...current.options, option] } : current));
+  }
+
+  function confirmRemoveOption(option: ProductOption) {
+    Alert.alert(
+      "Remove option?",
+      `“${option.name}” will no longer be offered on new orders. Existing orders keep it.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => void handleRemoveOption(option) },
+      ],
+    );
+  }
+
+  async function handleRemoveOption(option: ProductOption) {
+    setError("");
+    try {
+      await removeProductOption(option.id);
+      setProduct((current) => (current ? { ...current, options: current.options.filter((item) => item.id !== option.id) } : current));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove this option.");
+    }
   }
 
   async function handleRemove() {
@@ -142,7 +180,20 @@ export default function CatalogItemDetailScreen() {
           <ContentCard style={styles.card}>
             <Text style={styles.label}>Current price</Text>
             <Text style={styles.price}>{formatCurrency(product.price)}</Text>
-            <Text style={styles.description}>This is the price used for new order items. Existing orders keep their saved price.</Text>
+            <Text style={styles.description}>This is the price used for new order items, including options without their own price. Existing orders keep their saved price.</Text>
+          </ContentCard>
+          <ContentCard style={styles.card}>
+            <Text style={styles.label}>Options</Text>
+            {product.options.length ? product.options.map((option) => (
+              <View key={option.id} style={styles.optionRow}>
+                <Text numberOfLines={2} style={styles.optionName}>{option.name}</Text>
+                <Text style={styles.muted}>{formatCurrency(option.price ?? product.price)}</Text>
+                <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" hitSlop={8} onPress={() => confirmRemoveOption(option)}>
+                  <Text style={styles.removeText}>Remove</Text>
+                </Pressable>
+              </View>
+            )) : <Text style={styles.description}>No options. Orders list this item by its name only.</Text>}
+            <OptionAddForm existingNames={product.options.map((option) => option.name)} onAdd={handleAddOption} />
           </ContentCard>
           <ContentCard style={styles.card}>
             <Text style={styles.sectionTitle}>Item discount</Text>
@@ -189,6 +240,7 @@ const styles = StyleSheet.create({
   label: { color: colors.mutedText, fontSize: 12 },
   price: { color: colors.espresso, fontSize: 28, fontWeight: "700" },
   description: { color: colors.mutedText, fontSize: 13, lineHeight: 19 },
+<<<<<<< HEAD
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   typeRow: { flexDirection: "row", gap: spacing.sm },
   chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.card },
@@ -199,5 +251,10 @@ const styles = StyleSheet.create({
   optionNumbers: { flexDirection: "row", gap: spacing.sm },
   optionField: { flex: 1 },
   removeOption: { alignSelf: "flex-start", color: colors.brick, fontSize: 13, fontWeight: "700", paddingVertical: spacing.xs },
+=======
+  optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
+  optionName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
+  removeText: { color: colors.brick, fontSize: 13, fontWeight: "700" },
+>>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   muted: { color: colors.mutedText, fontSize: 12 },
 });

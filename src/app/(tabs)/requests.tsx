@@ -4,6 +4,7 @@ import { Pressable } from "@/components/ui/pressable";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { groupLinesByItem, summarizeLineGroup } from "@/domain/orders";
 import { SearchField } from "@/components/ui/design";
 import { NativeSegmentedControl } from "@/components/ui/native-segmented-control";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
@@ -108,7 +109,7 @@ export default function RequestsScreen() {
       <Text style={styles.meta}>Requested pickup {formatDate(item.dueDate)}</Text>
       {item.requestedItems.length ? (
         <Text numberOfLines={2} style={styles.itemsPreview}>
-          {item.requestedItems.map((requested) => `${requested.quantity} × ${requested.productName}`).join("   ·   ")}
+          {groupLinesByItem(item.requestedItems.map((requested) => ({ ...requested, name: requested.productName }))).map(summarizeLineGroup).join("   ·   ")}
         </Text>
       ) : null}
       {item.notes ? <Text numberOfLines={3} style={styles.notes}>{item.notes}</Text> : null}

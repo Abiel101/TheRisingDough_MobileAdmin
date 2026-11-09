@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 
 import type { NativeConfirmButtonProps } from "@/components/ui/native-confirm-button.types";
 import { colors, spacing } from "@/theme/tokens";

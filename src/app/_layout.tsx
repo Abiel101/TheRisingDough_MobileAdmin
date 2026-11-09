@@ -74,6 +74,7 @@ function RootNavigator() {
     if (!ownerId) return;
     registerForApprovalNotifications(ownerId).catch(() => undefined);
     const openNotification = (response: Parameters<typeof orderIdFromNotification>[0]) => {
+      Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => undefined);
       const requestId = requestIdFromNotification(response);
       if (requestId) {
         router.push({ pathname: "/request/[id]", params: { id: requestId } });

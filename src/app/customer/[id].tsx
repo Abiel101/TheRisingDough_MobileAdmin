@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { Avatar } from "@/components/ui/design";

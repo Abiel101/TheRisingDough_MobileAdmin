@@ -3,6 +3,7 @@ import { Alert, Button, Host, Text } from "@expo/ui/swift-ui";
 import { buttonBorderShape, buttonStyle, tint } from "@expo/ui/swift-ui/modifiers";
 
 import type { NativeConfirmButtonProps } from "@/components/ui/native-confirm-button.types";
+import { haptic } from "@/lib/haptics";
 import { colors } from "@/theme/tokens";
 
 export function NativeConfirmButton({
@@ -21,13 +22,14 @@ export function NativeConfirmButton({
     <Host matchContents>
       <Alert title={title} isPresented={visible} onIsPresentedChange={setVisible}>
         <Alert.Trigger>
-          <Button label={label} role="destructive" onPress={() => setVisible(true)} modifiers={[buttonStyle("borderedProminent"), buttonBorderShape("roundedRectangle", 12), tint(actionColor)]} />
+          <Button label={label} role="destructive" onPress={() => { haptic("medium"); setVisible(true); }} modifiers={[buttonStyle("borderedProminent"), buttonBorderShape("roundedRectangle", 12), tint(actionColor)]} />
         </Alert.Trigger>
         <Alert.Actions>
           <Button
             label={confirmLabel}
             role="destructive"
             onPress={() => {
+              haptic("success");
               setVisible(false);
               void onConfirm();
             }}

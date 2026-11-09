@@ -1,6 +1,8 @@
 import { Button, Host, type ButtonProps } from "@expo/ui";
-import { Platform, Pressable, StyleSheet, Text } from "react-native";
+import { Platform, StyleSheet, Text } from "react-native";
 
+import { Pressable } from "@/components/ui/pressable";
+import { haptic } from "@/lib/haptics";
 import { colors } from "@/theme/tokens";
 
 type NativeButtonProps = {
@@ -49,7 +51,10 @@ export function NativeButton({
       <Button
         disabled={disabled}
         label={label}
-        onPress={onPress}
+        onPress={() => {
+          haptic("light");
+          onPress();
+        }}
         variant={variant}
       />
     </Host>

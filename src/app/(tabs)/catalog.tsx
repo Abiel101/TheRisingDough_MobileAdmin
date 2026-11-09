@@ -1,11 +1,13 @@
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
-import { listProducts, type ProductRecord } from "@/lib/workspace";
+import { getCatalogPromotion, listProducts, type ProductRecord } from "@/lib/workspace";
+import { DEFAULT_CATALOG_PROMOTION, getCatalogUnitPriceCents, type CatalogPromotion } from "@/domain/catalog-pricing";
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -14,14 +16,16 @@ function formatCurrency(value: number) {
 
 export default function CatalogScreen() {
   const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [promotion, setPromotion] = useState<CatalogPromotion | null>(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const nextProducts = await listProducts();
+      const [nextProducts, nextPromotion] = await Promise.all([listProducts(), getCatalogPromotion()]);
       setProducts(nextProducts);
+      setPromotion(nextPromotion);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load the catalog.");
@@ -43,7 +47,14 @@ export default function CatalogScreen() {
 
   const header = (
     <View style={styles.listHeader}>
-      <ScreenHeader title="Item catalog" subtitle="Browse products and open one for details." />
+      <ScreenHeader title="Item catalog" subtitle="Browse products, packs, and discounts." />
+      <Pressable accessibilityRole="button" onPress={() => router.push("/catalog/discounts")} style={styles.promotionButton}>
+        <View style={styles.productCopy}>
+          <Text style={styles.promotionTitle}>{promotion?.isActive ? promotion.name : "Catalog discounts"}</Text>
+          <Text style={styles.promotionCopy}>{promotion?.isActive ? `${promotion.discountPercent}% promotion active · Tap to manage` : "Manage item offers and holiday promotions"}</Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </Pressable>
       <SearchField
         accessibilityLabel="Search catalog items"
         onChangeText={setSearch}
@@ -78,7 +89,18 @@ export default function CatalogScreen() {
             <Avatar index={index} name={item.name} />
             <View style={styles.productCopy}>
               <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
-              <Text style={styles.productPrice}>{formatCurrency(item.price)}</Text>
+              {(() => {
+                const currentCents = getCatalogUnitPriceCents(item.price, item.discount, promotion ?? DEFAULT_CATALOG_PROMOTION);
+                const currentPrice = currentCents / 100;
+                return (
+                  <View style={styles.priceRow}>
+                    {currentPrice < item.price ? <Text style={styles.struckPrice}>{formatCurrency(item.price)}</Text> : null}
+                    <Text style={[styles.productPrice, currentPrice < item.price && styles.salePrice]}>{formatCurrency(currentPrice)}</Text>
+                    {item.discount ? <Text style={styles.productMeta}>{item.discount.type === "percent" ? `${item.discount.value}% item discount` : `$${item.discount.value.toFixed(2)} item discount`}</Text> : null}
+                  </View>
+                );
+              })()}
+              {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
             </View>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
@@ -106,7 +128,14 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.76 },
   productCopy: { flex: 1, minWidth: 0, gap: 3 },
-  productName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
-  productPrice: { color: colors.mutedText, fontSize: 13 },
+  productName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  productPrice: { color: colors.mutedText, fontSize: 12 },
+  priceRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: spacing.xs },
+  struckPrice: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },
+  salePrice: { color: colors.sale, fontWeight: "700" },
+  productMeta: { color: colors.teal, fontSize: 11, fontWeight: "600" },
+  promotionButton: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.teal, backgroundColor: colors.card, padding: spacing.md },
+  promotionTitle: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  promotionCopy: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
   chevron: { color: colors.teal, fontSize: 25, lineHeight: 26 },
 });

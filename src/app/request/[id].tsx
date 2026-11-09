@@ -4,7 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import { NativeButton } from "@/components/ui/native-button";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { getHolidayRequestsSeenAt, isUnseenHolidayRequest, markHolidayRequestsSeen } from "@/lib/approval-inbox";
+import { markRequestRead } from "@/lib/approval-inbox";
 import { listHolidayRequestActivity, type HolidayRequestActivity } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -22,11 +22,11 @@ export default function RequestDetailScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [requests, seenAt] = await Promise.all([listHolidayRequestActivity(), getHolidayRequestsSeenAt()]);
+      const requests = await listHolidayRequestActivity();
       const next = requests.find((item) => item.id === id) ?? null;
       setRequest(next);
       setError("");
-      if (next && isUnseenHolidayRequest(next, seenAt)) await markHolidayRequestsSeen();
+      if (next) await markRequestRead(next.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load this request.");
     } finally {

@@ -1,6 +1,5 @@
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import { router } from "expo-router";
 import { SafeAreaView, type SafeAreaViewProps } from "react-native-safe-area-context";
 
 import { NativeIcon } from "@/components/ui/native-icon";
+import { Pressable } from "@/components/ui/pressable";
 import { NotificationBell } from "@/components/notification-bell";
 import { NativeText } from "@/components/ui/native-text";
 import { colors, serifFamily, spacing } from "@/theme/tokens";

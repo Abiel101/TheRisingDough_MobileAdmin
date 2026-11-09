@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 
-import { countUnseenNotifications } from "@/lib/approval-inbox";
+import { Pressable } from "@/components/ui/pressable";
+import { countUnseenNotifications, subscribeToInbox } from "@/lib/approval-inbox";
 import { colors } from "@/theme/tokens";
 
 const POLL_INTERVAL_MS = 30_000;
@@ -17,7 +18,11 @@ export function NotificationBell() {
   useFocusEffect(refresh);
   useEffect(() => {
     const timer = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    const unsubscribe = subscribeToInbox(refresh);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, [refresh]);
 
   return (
@@ -93,15 +98,15 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: "absolute",
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
+    top: -3,
+    right: -3,
+    minWidth: 15,
+    height: 15,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 9,
+    borderRadius: 8,
     backgroundColor: colors.brick,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
   },
-  badgeText: { color: colors.card, fontSize: 10, fontWeight: "800" },
+  badgeText: { color: colors.card, fontSize: 9, fontWeight: "700" },
 });

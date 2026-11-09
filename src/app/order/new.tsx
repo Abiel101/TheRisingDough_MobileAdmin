@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { useAuth } from "@/auth/auth-context";
@@ -8,8 +9,11 @@ import { SearchField } from "@/components/ui/design";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField, NativeMultilineFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { allocateLineTotals, calculateOrderTotals, type DiscountType } from "@/domain/orders";
-import { addCustomer, createOrder, listCustomers, listProducts, markHolidayRequestConverted, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
+import { calculateOrderTotals, type DiscountType } from "@/domain/orders";
+import { getCatalogUnitPriceCents } from "@/domain/catalog-pricing";
+import { findCustomerByPhone } from "@/domain/customers";
+import { resolveRequestedItems, type RequestedItem } from "@/domain/request-items";
+import { addCustomer, createOrder, getCatalogPromotion, listCustomers, listProducts, markHolidayRequestConverted, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -23,15 +27,15 @@ function localTodayKey() {
 }
 
 function parseRequestedItems(value?: string) {
-  if (!value) return [] as { productName: string; quantity: number }[];
+  if (!value) return [] as RequestedItem[];
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item: unknown) => {
       if (!item || typeof item !== "object") return [];
-      const requested = item as { productName?: unknown; quantity?: unknown };
+      const requested = item as { productName?: unknown; quantity?: unknown; unitPrice?: unknown };
       if (typeof requested.productName !== "string" || !Number.isInteger(Number(requested.quantity))) return [];
-      return [{ productName: requested.productName, quantity: Math.max(0, Number(requested.quantity)) }];
+      return [{ productName: requested.productName, quantity: Math.max(0, Number(requested.quantity)), unitPrice: Number(requested.unitPrice) || undefined }];
     });
   } catch {
     return [];
@@ -62,8 +66,10 @@ export default function NewOrderScreen() {
   const requestPrefilled = useRef(false);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [promotion, setPromotion] = useState({ name: "Holiday promotion", isActive: false, discountPercent: 0, stackOnProductDiscount: false });
   const [customerQuery, setCustomerQuery] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState(presetCustomerId ?? "");
+  const [createdCustomerId, setCreatedCustomerId] = useState("");
   const [showNewCustomer, setShowNewCustomer] = useState(Boolean(requestId));
   const [newCustomerName, setNewCustomerName] = useState(requestCustomerName ?? "");
   const [newCustomerPhone, setNewCustomerPhone] = useState(requestCustomerPhone ?? "");
@@ -74,25 +80,26 @@ export default function NewOrderScreen() {
   const [discountType, setDiscountType] = useState<DiscountType>("percent");
   const [discountInput, setDiscountInput] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [unmatchedRequestItems, setUnmatchedRequestItems] = useState<string[]>([]);
+  const [itemQuery, setItemQuery] = useState("");
+  const [pickedProductId, setPickedProductId] = useState("");
+  const [pickedChoiceKey, setPickedChoiceKey] = useState("");
+  const [pickedQuantity, setPickedQuantity] = useState("1");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const [nextCustomers, nextProducts] = await Promise.all([listCustomers(), listProducts()]);
+      const [nextCustomers, nextProducts, nextPromotion] = await Promise.all([listCustomers(), listProducts(), getCatalogPromotion()]);
       setCustomers(nextCustomers);
       setProducts(nextProducts);
+      setPromotion(nextPromotion);
       if (!requestPrefilled.current) {
         if (presetCustomerId) {
           setSelectedCustomerId(presetCustomerId);
         } else if (requestId) {
-          const phoneDigits = (requestCustomerPhone ?? "").replace(/\D/g, "");
-          const emailKey = (requestCustomerEmail ?? "").trim().toLocaleLowerCase();
-          const existing = nextCustomers.find((customer) =>
-            (phoneDigits && customer.phone.replace(/\D/g, "") === phoneDigits)
-            || (emailKey && customer.email.trim().toLocaleLowerCase() === emailKey),
-          );
+          const existing = findCustomerByPhone(nextCustomers, requestCustomerPhone ?? "");
           if (existing) {
             setSelectedCustomerId(existing.id);
             setShowNewCustomer(false);
@@ -106,10 +113,9 @@ export default function NewOrderScreen() {
           setNotes(requestNotes ?? "");
           const requestedItems = parseRequestedItems(requestItems);
           if (requestedItems.length) {
-            setQuantities(Object.fromEntries(requestedItems.flatMap((requested) => {
-              const product = nextProducts.find((item) => item.name.trim().toLocaleLowerCase() === requested.productName.trim().toLocaleLowerCase());
-              return product ? [[product.id, requested.quantity] as const] : [];
-            })));
+            const { quantities: resolved, unmatched } = resolveRequestedItems(requestedItems, nextProducts);
+            setQuantities(resolved);
+            setUnmatchedRequestItems(unmatched.map((item) => `${item.quantity} × ${item.productName}`));
           }
         }
         requestPrefilled.current = true;
@@ -130,29 +136,90 @@ export default function NewOrderScreen() {
   const matches = useMemo(() => query.length < 1 ? [] : customers.filter((customer) =>
     [customer.name, customer.phone, customer.email].some((value) => value.toLocaleLowerCase().includes(query)),
   ).slice(0, 6), [customers, query]);
-  const selectedItems = products.flatMap((product) => {
-    const quantity = quantities[product.id] ?? 0;
-    return quantity > 0 ? [{ product, quantity }] : [];
+  const choices = products.flatMap((product) => [
+    { key: product.id, product, itemName: product.name, label: "Single item", originalCents: Math.round(product.price * 100) },
+    ...product.pricingOptions.map((option) => ({
+      key: `${product.id}::${option.id}`,
+      product,
+      itemName: `${product.name} · ${option.label} (${option.packSize} pieces)`,
+      label: `${option.label} · ${option.packSize} pieces`,
+      originalCents: option.priceCents,
+    })),
+  ]);
+  const phoneMatch = findCustomerByPhone(customers, newCustomerPhone);
+  const selectedItems = choices.flatMap((choice) => {
+    const quantity = quantities[choice.key] ?? 0;
+    if (quantity < 1) return [];
+    const unitPrice = getCatalogUnitPriceCents(choice.product.price, choice.product.discount, promotion, choice.originalCents) / 100;
+    return [{ product: choice.product, quantity, itemName: choice.itemName, unitPrice, key: choice.key, originalUnitPrice: choice.originalCents / 100, label: choice.label }];
   });
 
+  const itemQueryText = itemQuery.trim().toLocaleLowerCase();
+  const itemMatches = useMemo(
+    () => (itemQueryText ? products.filter((product) => product.name.toLocaleLowerCase().includes(itemQueryText)).slice(0, 8) : []),
+    [itemQueryText, products],
+  );
+  const pickedProduct = products.find((product) => product.id === pickedProductId);
+  const pickedChoices = pickedProduct ? choices.filter((choice) => choice.product.id === pickedProduct.id) : [];
+  const pickedChoice = pickedChoices.find((choice) => choice.key === pickedChoiceKey) ?? pickedChoices[0];
+  const pickedCount = Math.floor(Number(pickedQuantity.replace(/\D/g, "")) || 0);
+  const unitPriceOf = (choice: (typeof choices)[number]) =>
+    getCatalogUnitPriceCents(choice.product.price, choice.product.discount, promotion, choice.originalCents) / 100;
+
+  function pickProduct(product: ProductRecord) {
+    setPickedProductId(product.id);
+    setPickedChoiceKey(product.id);
+    setPickedQuantity("1");
+  }
+
+  function addPickedItem() {
+    if (!pickedChoice || pickedCount < 1) return;
+    setQuantities((current) => ({ ...current, [pickedChoice.key]: (current[pickedChoice.key] ?? 0) + pickedCount }));
+    setPickedProductId("");
+    setPickedChoiceKey("");
+    setPickedQuantity("1");
+    setItemQuery("");
+  }
+
   const discountValue = Math.round((Number(discountInput.replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
-  const lineItems = selectedItems.map(({ product, quantity }) => ({
-    productId: product.id,
-    productName: product.name,
-    unitPrice: product.price,
+  const lineItems = selectedItems.map(({ product, quantity, unitPrice, key, itemName }) => ({
+    productId: key,
+    productName: itemName,
+    unitPrice,
     quantity,
   }));
   const discount = discountValue > 0 ? { type: discountType, value: discountValue } : null;
   const { subtotal, discountAmount, total } = calculateOrderTotals(lineItems, discount);
-  const discountedLineTotals = allocateLineTotals(lineItems, discountAmount);
-  const discountedTotalByProduct = new Map(lineItems.map((item, index) => [item.productId, discountedLineTotals[index]]));
   const discountError =
     discountType === "percent" && discountValue > 100
       ? "A percentage discount can’t be more than 100%."
       : discountType === "amount" && discountValue > subtotal
         ? "A discount can’t be more than the order subtotal."
         : "";
-  const canCreate = !saving && !!selectedCustomer && selectedItems.length > 0 && !discountError;
+  const canCreate = !saving && (!!selectedCustomer || (showNewCustomer && !!newCustomerPhone.trim())) && selectedItems.length > 0 && !discountError;
+
+  // A saved customer with the same phone number is a returning customer, so reuse their profile.
+  async function resolveCustomer(): Promise<{ customer: CustomerRecord; isNew: boolean } | null> {
+    if (selectedCustomer) return { customer: selectedCustomer, isNew: selectedCustomer.id === createdCustomerId };
+    if (!session?.user.id || !newCustomerPhone.trim()) return null;
+    const returning = findCustomerByPhone(customers, newCustomerPhone);
+    if (returning) return { customer: returning, isNew: false };
+    const customer = await addCustomer(session.user.id, {
+      name: newCustomerName,
+      phone: newCustomerPhone,
+      email: newCustomerEmail,
+      address: newCustomerAddress,
+    });
+    setCustomers((current) => [...current, customer].sort((first, second) => first.name.localeCompare(second.name)));
+    return { customer, isNew: true };
+  }
+
+  function selectReturningCustomer(customer: CustomerRecord) {
+    setSelectedCustomerId(customer.id);
+    setCustomerQuery("");
+    setShowNewCustomer(false);
+    setError("");
+  }
 
   async function saveCustomer() {
     if (!session?.user.id) return;
@@ -163,14 +230,10 @@ export default function NewOrderScreen() {
     setSaving(true);
     setError("");
     try {
-      const customer = await addCustomer(session.user.id, {
-        name: newCustomerName,
-        phone: newCustomerPhone,
-        email: newCustomerEmail,
-        address: newCustomerAddress,
-      });
-      setCustomers((current) => [...current, customer].sort((first, second) => first.name.localeCompare(second.name)));
-      setSelectedCustomerId(customer.id);
+      const resolved = await resolveCustomer();
+      if (!resolved) return;
+      setSelectedCustomerId(resolved.customer.id);
+      setCreatedCustomerId(resolved.isNew ? resolved.customer.id : "");
       setCustomerQuery("");
       setShowNewCustomer(false);
       setNewCustomerName("");
@@ -185,11 +248,14 @@ export default function NewOrderScreen() {
   }
 
   async function saveOrder() {
-    if (!session?.user.id || !selectedCustomer || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || !selectedItems.length) return;
+    if (!session?.user.id || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || !selectedItems.length) return;
     setSaving(true);
     setError("");
     try {
-      const id = await createOrder({ ownerId: session.user.id, customer: selectedCustomer, dueDate, notes, items: selectedItems, discount });
+      const resolved = await resolveCustomer();
+      if (!resolved) return;
+      setSelectedCustomerId(resolved.customer.id);
+      const id = await createOrder({ ownerId: session.user.id, customer: resolved.customer, dueDate, notes, items: selectedItems, discount });
       if (requestId) {
         try {
           await markHolidayRequestConverted(requestId, id);
@@ -221,6 +287,9 @@ export default function NewOrderScreen() {
             <View style={styles.customerCopy}>
               <Text style={styles.customerName}>{selectedCustomer.name || selectedCustomer.phone}</Text>
               <Text style={styles.hint}>{selectedCustomer.phone}</Text>
+              <Text style={[styles.customerBadge, selectedCustomer.id === createdCustomerId && styles.customerBadgeNew]}>
+                {selectedCustomer.id === createdCustomerId ? "New customer" : "Returning customer"}
+              </Text>
             </View>
             <Pressable onPress={() => { setSelectedCustomerId(""); setCustomerQuery(""); }}><Text style={styles.changeText}>Change</Text></Pressable>
           </View>
@@ -242,9 +311,21 @@ export default function NewOrderScreen() {
             <Text style={styles.sectionTitle}>New customer</Text>
             <NativeFormField label="Name (optional)" onChangeText={setNewCustomerName} placeholder="Customer name" value={newCustomerName} />
             <NativeFormField autoComplete="tel" keyboardType="phone-pad" label="Phone number" onChangeText={setNewCustomerPhone} placeholder="Phone number" value={newCustomerPhone} />
+            {phoneMatch ? (
+              <View style={[styles.matchBox, styles.matchBoxReturning]}>
+                <Text style={styles.matchTitle}>Returning customer</Text>
+                <Text style={styles.hint}>{phoneMatch.name || phoneMatch.phone} is already saved with this number. Their profile will be used.</Text>
+                <NativeButton label="Use their profile" onPress={() => selectReturningCustomer(phoneMatch)} />
+              </View>
+            ) : newCustomerPhone.trim() ? (
+              <View style={styles.matchBox}>
+                <Text style={styles.matchTitle}>New customer</Text>
+                <Text style={styles.hint}>This number isn’t saved yet. A profile is created when you create the order.</Text>
+              </View>
+            ) : null}
             <NativeFormField autoCapitalize="none" keyboardType="email-address" label="Email (optional)" onChangeText={setNewCustomerEmail} placeholder="name@example.com" value={newCustomerEmail} />
             <NativeFormField label="Address (optional)" onChangeText={setNewCustomerAddress} placeholder="Street address" value={newCustomerAddress} />
-            <NativeButton disabled={saving || !newCustomerPhone.trim()} label={saving ? "Saving customer…" : "Save and select customer"} onPress={() => void saveCustomer()} />
+            <NativeButton disabled={saving || !newCustomerPhone.trim()} label={saving ? "Saving customer…" : phoneMatch ? "Use returning customer" : "Save as new customer"} onPress={() => void saveCustomer()} />
           </View>
         ) : null}
       </ContentCard>
@@ -255,30 +336,102 @@ export default function NewOrderScreen() {
       </ContentCard>
 
       <ContentCard style={styles.card}>
-        <Text style={styles.sectionTitle}>Items</Text>
+        <Text style={styles.sectionTitle}>Add items</Text>
         {loading && !products.length ? <Text style={styles.hint}>Loading catalog…</Text> : null}
         {!loading && !products.length ? <Text style={styles.hint}>Add products in Catalog before creating an order.</Text> : null}
-        {products.map((product) => {
-          const quantity = quantities[product.id] ?? 0;
-          return (
-            <View key={product.id} style={styles.productRow}>
-              <View style={styles.customerCopy}>
-                <Text style={styles.customerName}>{product.name}</Text>
-                {quantity > 0 && discountAmount > 0 ? (
-                  <View style={styles.priceRow}>
-                    <Text style={styles.struck}>${(product.price * quantity).toFixed(2)}</Text>
-                    <Text style={styles.sale}>${(discountedTotalByProduct.get(product.id) ?? 0).toFixed(2)}</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.hint}>${product.price.toFixed(2)}</Text>
-                )}
-              </View>
-              <Pressable accessibilityLabel={`Remove one ${product.name}`} disabled={!quantity || saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: Math.max((current[product.id] ?? 0) - 1, 0) }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
-              <Text style={styles.quantityText}>{quantity}</Text>
-              <Pressable accessibilityLabel={`Add one ${product.name}`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
+        {promotion.isActive && promotion.discountPercent > 0 ? (
+          <Text style={styles.promoHint}>{promotion.name} · {promotion.discountPercent}% applied to eligible items</Text>
+        ) : null}
+        {unmatchedRequestItems.length ? (
+          <MessageCard
+            title="Add these requested items manually"
+            message={`No matching catalog item was found for: ${unmatchedRequestItems.join(", ")}.`}
+            tone="error"
+          />
+        ) : null}
+        {pickedProduct && pickedChoice ? (
+          <View style={styles.pickPanel}>
+            <View style={styles.pickHeader}>
+              <Text style={styles.pickTitle}>{pickedProduct.name}</Text>
+              <Pressable accessibilityRole="button" onPress={() => { setPickedProductId(""); setPickedChoiceKey(""); }}>
+                <Text style={styles.changeText}>Change</Text>
+              </Pressable>
             </View>
-          );
-        })}
+            {pickedChoices.length > 1 ? (
+              <View style={styles.chipRow}>
+                {pickedChoices.map((choice) => {
+                  const selected = choice.key === pickedChoice.key;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      key={choice.key}
+                      onPress={() => setPickedChoiceKey(choice.key)}
+                      style={[styles.chip, selected && styles.chipSelected]}
+                    >
+                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{choice.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+            <View style={styles.priceRow}>
+              {unitPriceOf(pickedChoice) < pickedChoice.originalCents / 100 ? <Text style={styles.struck}>{formatCurrency(pickedChoice.originalCents / 100)}</Text> : null}
+              <Text style={[styles.pickPrice, unitPriceOf(pickedChoice) < pickedChoice.originalCents / 100 && styles.sale]}>
+                {formatCurrency(unitPriceOf(pickedChoice))} each
+              </Text>
+            </View>
+            <View style={styles.pickControls}>
+              <Text style={styles.fieldLabel}>Quantity</Text>
+              <View style={styles.stepper}>
+                <Pressable accessibilityLabel="One fewer" disabled={pickedCount <= 1} onPress={() => setPickedQuantity(String(Math.max(pickedCount - 1, 1)))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
+                <TextInput
+                  accessibilityLabel="Quantity"
+                  keyboardType="number-pad"
+                  onChangeText={(text) => setPickedQuantity(text.replace(/\D/g, "").slice(0, 3))}
+                  selectTextOnFocus
+                  style={styles.quantityInput}
+                  value={pickedQuantity}
+                />
+                <Pressable accessibilityLabel="One more" onPress={() => setPickedQuantity(String(pickedCount + 1))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
+              </View>
+            </View>
+            <NativeButton disabled={pickedCount < 1} label={`Add to order · ${formatCurrency(unitPriceOf(pickedChoice) * pickedCount)}`} onPress={addPickedItem} />
+          </View>
+        ) : (
+          <>
+            <SearchField accessibilityLabel="Search catalog items" onChangeText={setItemQuery} placeholder="Search items to add" value={itemQuery} />
+            {itemMatches.map((product) => (
+              <Pressable key={product.id} onPress={() => pickProduct(product)} style={styles.customerResult}>
+                <Text style={styles.customerName}>{product.name}</Text>
+                <Text style={styles.hint}>
+                  {formatCurrency(product.price)}{product.pricingOptions.length ? ` · ${product.pricingOptions.map((option) => option.label).join(" / ")} available` : ""}
+                </Text>
+              </Pressable>
+            ))}
+            {itemQueryText && !itemMatches.length && products.length ? <Text style={styles.hint}>No catalog item matches “{itemQuery.trim()}”.</Text> : null}
+            {!itemQueryText && products.length ? <Text style={styles.hint}>Type an item name, then choose a size and quantity.</Text> : null}
+          </>
+        )}
+      </ContentCard>
+
+      <ContentCard style={styles.card}>
+        <Text style={styles.sectionTitle}>Order items{selectedItems.length ? ` (${selectedItems.length})` : ""}</Text>
+        {selectedItems.length ? selectedItems.map((line) => (
+          <View key={line.key} style={styles.lineRow}>
+            <View style={styles.customerCopy}>
+              <Text style={styles.customerName}>{line.product.name}</Text>
+              <Text style={styles.hint}>{line.label} · {formatCurrency(line.unitPrice)} each</Text>
+              <Text style={styles.lineTotal}>{formatCurrency(line.unitPrice * line.quantity)}</Text>
+            </View>
+            <View style={styles.stepper}>
+              <Pressable accessibilityLabel={`Remove one ${line.itemName}`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [line.key]: Math.max((current[line.key] ?? 0) - 1, 0) }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
+              <Text style={styles.quantityText}>{line.quantity}</Text>
+              <Pressable accessibilityLabel={`Add one ${line.itemName}`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [line.key]: (current[line.key] ?? 0) + 1 }))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>+</Text></Pressable>
+              <Pressable accessibilityLabel={`Remove ${line.itemName} from order`} disabled={saving} onPress={() => setQuantities((current) => ({ ...current, [line.key]: 0 }))} style={styles.removeButton}><Text style={styles.removeText}>✕</Text></Pressable>
+            </View>
+          </View>
+        )) : <Text style={styles.hint}>No items yet. Search above to add the first one.</Text>}
         <NativeMultilineFormField label="Notes (optional)" onChangeText={setNotes} placeholder="Order details" value={notes} />
       </ContentCard>
       <ContentCard style={styles.card}>
@@ -349,9 +502,26 @@ const styles = StyleSheet.create({
   hint: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
   changeText: { color: colors.teal, fontSize: 13, fontWeight: "700" },
   customerResult: { gap: 3, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.parchment, padding: spacing.md },
+  customerBadge: { alignSelf: "flex-start", color: colors.sage, fontSize: 9, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 },
+  customerBadgeNew: { color: colors.bronze },
+  matchBox: { gap: spacing.xs, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.parchment, padding: spacing.md },
+  matchBoxReturning: { borderColor: colors.sage, gap: spacing.sm },
+  matchTitle: { color: colors.espresso, fontSize: 13, fontWeight: "800" },
   newCustomerForm: { gap: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.md },
-  productRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.xs },
-  quantityButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.parchment },
+  lineRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.md },
+  lineTotal: { color: colors.teal, fontSize: 14, fontWeight: "800" },
+  pickPanel: { gap: spacing.md, borderWidth: 1.5, borderColor: colors.teal, borderRadius: 14, backgroundColor: colors.parchment, padding: spacing.md },
+  pickHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  pickTitle: { flex: 1, color: colors.espresso, fontSize: 17, fontWeight: "700" },
+  pickPrice: { color: colors.espresso, fontSize: 14, fontWeight: "600" },
+  pickControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  fieldLabel: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  stepper: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  quantityInput: { minWidth: 56, height: 40, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.card, color: colors.espresso, fontSize: 18, fontWeight: "700", textAlign: "center" },
+  removeButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  removeText: { color: colors.brick, fontSize: 15, fontWeight: "800" },
+  promoHint: { color: colors.sale, fontSize: 12, fontWeight: "700" },
+  quantityButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   quantitySymbol: { color: colors.teal, fontSize: 19, fontWeight: "700" },
   quantityText: { minWidth: 20, color: colors.espresso, textAlign: "center", fontWeight: "700" },
   priceRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },

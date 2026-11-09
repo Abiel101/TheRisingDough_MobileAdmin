@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import type { ApprovalStatus, Discount, DiscountType, OrderStatus, PaymentMethod } from "@/domain/orders";
+import { DEFAULT_CATALOG_PROMOTION, parsePriceOptions, type CatalogDiscount, type CatalogPriceOption, type CatalogPromotion } from "@/domain/catalog-pricing";
 
 export type CustomerRecord = {
   id: string;
@@ -10,7 +11,13 @@ export type CustomerRecord = {
   createdAt: string;
 };
 
-export type ProductRecord = { id: string; name: string; price: number };
+export type ProductRecord = {
+  id: string;
+  name: string;
+  price: number;
+  discount: CatalogDiscount;
+  pricingOptions: CatalogPriceOption[];
+};
 export type OrderLine = {
   id: string;
   productId: string;
@@ -18,7 +25,7 @@ export type OrderLine = {
   price: number;
   quantity: number;
 };
-export type OrderItemInput = { product: ProductRecord; quantity: number };
+export type OrderItemInput = { product: ProductRecord; quantity: number; itemName?: string; unitPrice?: number };
 export type OrderRecord = {
   id: string;
   number: string;
@@ -55,7 +62,14 @@ type CustomerRow = {
   address: string | null;
   created_at: string;
 };
-type ProductRow = { id: string; name: string; unit_price: number | string };
+type ProductRow = {
+  id: string;
+  name: string;
+  unit_price: number | string;
+  discount_type?: "percent" | "amount" | null;
+  discount_value?: number | string | null;
+  pricing_options?: unknown;
+};
 type OrderRow = {
   id: string;
   order_number: string;
@@ -187,30 +201,84 @@ export async function addCustomer(
   return mapCustomer(data as CustomerRow);
 }
 
-export async function listProducts(): Promise<ProductRecord[]> {
-  const { data, error } = await supabase
-    .from("admin_products")
-    .select("id,name,unit_price")
-    .order("name", { ascending: true })
-    .limit(500);
-  throwIfError(error);
-  return ((data ?? []) as ProductRow[]).map((row) => ({
+function mapProduct(row: ProductRow): ProductRecord {
+  return {
     id: row.id,
     name: row.name,
     price: Number(row.unit_price),
-  }));
+    discount: row.discount_type && Number(row.discount_value) > 0
+      ? { type: row.discount_type, value: Number(row.discount_value) }
+      : null,
+    pricingOptions: parsePriceOptions(row.pricing_options),
+  };
+}
+
+export async function listProducts(): Promise<ProductRecord[]> {
+  const { data, error } = await supabase
+    .from("admin_products")
+    .select("id,name,unit_price,discount_type,discount_value,pricing_options")
+    .order("name", { ascending: true })
+    .limit(500);
+  throwIfError(error);
+  return ((data ?? []) as ProductRow[]).map(mapProduct);
 }
 
 export async function getProduct(id: string): Promise<ProductRecord | null> {
   const { data, error } = await supabase
     .from("admin_products")
-    .select("id,name,unit_price")
+    .select("id,name,unit_price,discount_type,discount_value,pricing_options")
     .eq("id", id)
     .maybeSingle();
   throwIfError(error);
   if (!data) return null;
   const row = data as ProductRow;
-  return { id: row.id, name: row.name, price: Number(row.unit_price) };
+  return mapProduct(row);
+}
+
+export async function updateProductPricing(
+  id: string,
+  input: { discount: CatalogDiscount; pricingOptions: CatalogPriceOption[] },
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("admin_products")
+    .update({
+      discount_type: input.discount?.type ?? null,
+      discount_value: input.discount?.value ?? 0,
+      pricing_options: input.pricingOptions,
+    })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Catalog item was not found for this account.");
+}
+
+export async function getCatalogPromotion(): Promise<CatalogPromotion> {
+  const { data, error } = await supabase
+    .from("admin_catalog_promotions")
+    .select("name,is_active,discount_percent,stack_on_product_discount")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) return DEFAULT_CATALOG_PROMOTION;
+  const row = data as { name: string; is_active: boolean; discount_percent: number | string; stack_on_product_discount: boolean };
+  return {
+    name: row.name,
+    isActive: row.is_active,
+    discountPercent: Number(row.discount_percent),
+    stackOnProductDiscount: row.stack_on_product_discount,
+  };
+}
+
+export async function saveCatalogPromotion(ownerId: string, promotion: CatalogPromotion): Promise<void> {
+  const { error } = await supabase.from("admin_catalog_promotions").upsert({
+    owner_id: ownerId,
+    name: promotion.name.trim() || "Holiday promotion",
+    is_active: promotion.isActive,
+    discount_percent: promotion.discountPercent,
+    stack_on_product_discount: promotion.stackOnProductDiscount,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "owner_id" });
+  throwIfError(error);
 }
 
 export async function addProduct(
@@ -221,12 +289,12 @@ export async function addProduct(
   const { data, error } = await supabase
     .from("admin_products")
     .insert({ owner_id: ownerId, name: name.trim(), unit_price: price })
-    .select("id,name,unit_price")
+    .select("id,name,unit_price,discount_type,discount_value,pricing_options")
     .single();
   throwIfError(error);
   if (!data) throw new Error("Supabase returned no catalog item.");
   const row = data as ProductRow;
-  return { id: row.id, name: row.name, price: Number(row.unit_price) };
+  return mapProduct(row);
 }
 
 export async function removeProduct(id: string): Promise<void> {
@@ -433,12 +501,12 @@ function validateOrderItems(items: OrderItemInput[]) {
 
 async function insertOrderItems(ownerId: string, orderId: string, items: OrderItemInput[]) {
   const { error } = await supabase.from("admin_order_items").insert(
-    items.map(({ product, quantity }) => ({
+    items.map(({ product, quantity, itemName, unitPrice }) => ({
       owner_id: ownerId,
       order_id: orderId,
       catalog_product_id: product.id,
-      item_name: product.name,
-      unit_price: product.price,
+      item_name: itemName ?? product.name,
+      unit_price: unitPrice ?? product.price,
       quantity,
     })),
   );
@@ -498,20 +566,21 @@ export async function addItemsToOrder(
   validateOrderItems(items);
   const { data, error } = await supabase
     .from("admin_order_items")
-    .select("id,catalog_product_id,unit_price,quantity")
+    .select("id,catalog_product_id,item_name,unit_price,quantity")
     .eq("order_id", orderId);
   throwIfError(error);
   const current = (data ?? []) as {
     id: string;
     catalog_product_id: string | null;
+    item_name: string;
     unit_price: number | string;
     quantity: number;
   }[];
-  const nextItems = new Map(current.map((item) => [`${item.catalog_product_id ?? ""}:${Number(item.unit_price)}`, item]));
+  const nextItems = new Map(current.map((item) => [`${item.catalog_product_id ?? ""}:${item.item_name}:${Number(item.unit_price)}`, item]));
   const newItems: OrderItemInput[] = [];
 
   for (const input of items) {
-    const key = `${input.product.id}:${input.product.price}`;
+    const key = `${input.product.id}:${input.itemName ?? input.product.name}:${input.unitPrice ?? input.product.price}`;
     const existing = nextItems.get(key);
     if (!existing) {
       newItems.push(input);
@@ -685,6 +754,17 @@ export async function listHolidayRequestActivity(): Promise<HolidayRequestActivi
     status: row.status as "pending" | "converted",
     convertedOrderId: row.converted_order_id ?? null,
   }));
+}
+
+export async function deleteHolidayRequest(requestId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("admin_order_requests")
+    .delete()
+    .eq("id", requestId)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Request was not deleted. Apply the latest database migration and try again.");
 }
 
 export async function markHolidayRequestConverted(requestId: string, orderId: string): Promise<void> {

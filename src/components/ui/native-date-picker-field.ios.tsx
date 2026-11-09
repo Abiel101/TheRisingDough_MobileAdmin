@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DatePicker, Host } from "@expo/ui/swift-ui";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 
 import type { NativeDatePickerFieldProps } from "@/components/ui/native-date-picker.types";
 import { dateFromKey, dateToKey, formatDateKey } from "@/components/ui/native-date-picker.types";

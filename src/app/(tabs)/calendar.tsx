@@ -1,6 +1,7 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { PanResponder, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 
 import { OrderCard } from "@/components/order-card";
 import { NativeIcon } from "@/components/ui/native-icon";

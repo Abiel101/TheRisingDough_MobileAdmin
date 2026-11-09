@@ -1,4 +1,5 @@
-import { Platform, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
+import { Platform, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { NativeIcon } from "@/components/ui/native-icon";

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -105,7 +106,7 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.76 },
   customerCopy: { flex: 1, minWidth: 0, gap: 3 },
-  customerName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
-  customerDetail: { color: colors.mutedText, fontSize: 12 },
+  customerName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  customerDetail: { color: colors.mutedText, fontSize: 11 },
   chevron: { color: colors.teal, fontSize: 25, lineHeight: 26 },
 });

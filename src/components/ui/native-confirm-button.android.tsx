@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertDialog, Button, Host, Text, TextButton } from "@expo/ui/jetpack-compose";
 
 import type { NativeConfirmButtonProps } from "@/components/ui/native-confirm-button.types";
+import { haptic } from "@/lib/haptics";
 import { colors } from "@/theme/tokens";
 
 export function NativeConfirmButton({
@@ -18,7 +19,7 @@ export function NativeConfirmButton({
 
   return (
     <Host matchContents>
-      <Button onClick={() => setVisible(true)} colors={{ containerColor: actionColor, contentColor: colors.card }}>
+      <Button onClick={() => { haptic("medium"); setVisible(true); }} colors={{ containerColor: actionColor, contentColor: colors.card }}>
         <Text>{label}</Text>
       </Button>
       {visible ? (
@@ -36,6 +37,7 @@ export function NativeConfirmButton({
             <TextButton
               colors={{ contentColor: actionColor }}
               onClick={() => {
+                haptic("success");
                 setVisible(false);
                 void onConfirm();
               }}

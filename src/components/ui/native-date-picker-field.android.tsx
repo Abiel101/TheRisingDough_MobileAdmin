@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DatePickerDialog, Host } from "@expo/ui/jetpack-compose";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Pressable } from "@/components/ui/pressable";
 
 import type { NativeDatePickerFieldProps } from "@/components/ui/native-date-picker.types";
 import { formatDateKey } from "@/components/ui/native-date-picker.types";

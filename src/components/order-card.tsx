@@ -1,6 +1,8 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+
+import { Pressable } from "@/components/ui/pressable";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 
 import { calculateOrderTotals, orderStatuses, orderStatusLabels, resolveStatus, type OrderStatus } from "@/domain/orders";
@@ -60,6 +62,7 @@ export function OrderCard({
       accessibilityLabel={`Order ${order.number}, ${order.customer}, due ${formatDate(order.dueDate)}, ${orderStatusLabels[status]}. Open details.`}
       accessibilityHint={nextStatus ? `Swipe left to change the status to ${orderStatusLabels[nextStatus]}.` : undefined}
       accessibilityRole="button"
+      animated={false}
       onPress={() => router.push({ pathname: "/order/[id]", params: { id: order.id } })}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
@@ -165,14 +168,14 @@ export function formatDate(date: string) {
 
 const styles = StyleSheet.create({
   swipeContainer: {
-    borderRadius: 22,
+    borderRadius: 16,
   },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 22,
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    borderRadius: 16,
+    gap: 3,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
   },
   pressed: {
     backgroundColor: "#F0ECE3",
@@ -215,13 +218,13 @@ const styles = StyleSheet.create({
   orderNumber: {
     flex: 1,
     color: colors.espresso,
-    fontSize: 17,
-    fontWeight: "800",
+    fontSize: 14,
+    fontWeight: "700",
   },
   total: {
     color: colors.espresso,
-    fontSize: 17,
-    fontWeight: "800",
+    fontSize: 14,
+    fontWeight: "700",
   },
   metaRow: {
     flexDirection: "row",
@@ -232,36 +235,36 @@ const styles = StyleSheet.create({
   customer: {
     flex: 1,
     color: colors.mutedText,
-    fontSize: 15,
+    fontSize: 12.5,
   },
   pillGroup: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: 4,
   },
   pill: {
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
   pillText: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   items: {
-    gap: 2,
+    gap: 1,
   },
   itemText: {
     color: colors.espresso,
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "500",
   },
   moreItems: {
     color: colors.mutedText,
-    fontSize: 11,
+    fontSize: 10,
   },
   dueLine: {
     color: colors.mutedText,
-    fontSize: 11,
+    fontSize: 10,
   },
 });

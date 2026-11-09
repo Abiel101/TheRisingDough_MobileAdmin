@@ -7,7 +7,6 @@ import {
   Modal,
   PanResponder,
   Platform,
-  Pressable,
   ScrollView,
   Share,
   StyleSheet,
@@ -17,6 +16,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Pressable } from "@/components/ui/pressable";
 
 import { useAuth } from "@/auth/auth-context";
 import {
@@ -44,10 +44,10 @@ import {
   type OrderRecord,
   type ProductRecord,
 } from "@/lib/workspace";
+import { markApprovalRead } from "@/lib/approval-inbox";
+import { MANAGER_PASSWORD } from "@/lib/manager";
 import { colors, spacing } from "@/theme/tokens";
 
-// Client-side manager check only; it does not protect the data on the server.
-const MANAGER_PASSWORD = "2585";
 const ADD_ITEMS_CUTOFF_DAYS = 3;
 const serif = Platform.select({ ios: "Georgia", android: "serif", default: "serif" });
 
@@ -132,6 +132,7 @@ export default function OrderDetailScreen() {
       const result = await getOrder(id);
       setOrder(result);
       if (result) {
+        void markApprovalRead(result.id);
         setPaymentMethodChoice(result.paymentMethod ?? "cash");
         setPaymentMethodOtherChoice(result.paymentMethodOther);
       }
@@ -773,8 +774,8 @@ export default function OrderDetailScreen() {
 
       <Modal animationType="fade" onRequestClose={closeMenu} transparent visible={menuMode !== "closed"}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboardAvoider}>
-        <Pressable onPress={closeMenu} style={styles.backdrop}>
-          <Pressable onPress={() => undefined} style={styles.menuSheet}>
+        <Pressable feedback={false} onPress={closeMenu} style={styles.backdrop}>
+          <Pressable feedback={false} onPress={() => undefined} style={styles.menuSheet}>
             {menuMode === "menu" ? (
               <>
                 <Text style={styles.menuTitle}>Order options</Text>
@@ -883,48 +884,48 @@ const styles = StyleSheet.create({
   roundButtonText: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   brand: { color: colors.mutedText, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
   content: { gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xl },
-  title: { color: colors.espresso, fontFamily: serif, fontSize: 36, fontWeight: "800", lineHeight: 40 },
-  pillRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  pill: { borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: 5 },
-  pillText: { fontSize: 11, fontWeight: "700" },
-  orderNumber: { color: colors.mutedText, fontSize: 11, fontWeight: "600", letterSpacing: 0.5 },
-  dueCard: { gap: spacing.md, borderRadius: 20, backgroundColor: "#FBE6D8", padding: spacing.md },
+  title: { color: colors.espresso, fontFamily: serif, fontSize: 30, fontWeight: "800", lineHeight: 34 },
+  pillRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  pill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  pillText: { fontSize: 10, fontWeight: "700" },
+  orderNumber: { color: colors.mutedText, fontSize: 10, fontWeight: "600", letterSpacing: 0.4 },
+  dueCard: { gap: spacing.sm, borderRadius: 16, backgroundColor: "#FBE6D8", paddingHorizontal: spacing.md, paddingVertical: 10 },
   dueTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
   totalBlock: { alignItems: "flex-end" },
-  dueLabel: { color: colors.espresso, fontSize: 10, fontWeight: "700", letterSpacing: 1.2 },
-  dueValue: { color: colors.espresso, fontFamily: serif, fontSize: 22, fontWeight: "800" },
+  dueLabel: { color: colors.espresso, fontSize: 9, fontWeight: "700", letterSpacing: 1 },
+  dueValue: { color: colors.espresso, fontFamily: serif, fontSize: 18, fontWeight: "700" },
   segmentRow: { flexDirection: "row", gap: spacing.xs },
-  segmentCell: { flex: 1, gap: 6 },
-  segment: { height: 6, borderRadius: 3, backgroundColor: "#00000014" },
-  segmentLabel: { color: colors.mutedText, fontSize: 10, textAlign: "center" },
+  segmentCell: { flex: 1, gap: 4 },
+  segment: { height: 5, borderRadius: 3, backgroundColor: "#00000014" },
+  segmentLabel: { color: colors.mutedText, fontSize: 9, textAlign: "center" },
   segmentLabelReached: { color: colors.espresso, fontWeight: "700" },
-  cancelledBanner: { color: colors.brick, fontSize: 13, fontWeight: "700", textAlign: "center" },
-  card: { gap: spacing.sm, borderRadius: 20, backgroundColor: colors.card, padding: spacing.md },
-  customerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  avatar: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: "#E4EBDD" },
-  avatarText: { color: colors.teal, fontFamily: serif, fontSize: 18, fontWeight: "800" },
-  customerCopy: { flex: 1, gap: 2 },
-  customerName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
-  callButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 20, backgroundColor: colors.teal },
-  callGlyph: { color: colors.card, fontSize: 18 },
+  cancelledBanner: { color: colors.brick, fontSize: 12, fontWeight: "700", textAlign: "center" },
+  card: { gap: 6, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: spacing.md, paddingVertical: 10 },
+  customerRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  avatar: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#E4EBDD" },
+  avatarText: { color: colors.teal, fontFamily: serif, fontSize: 16, fontWeight: "700" },
+  customerCopy: { flex: 1, gap: 1 },
+  customerName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  callButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 17, backgroundColor: colors.teal },
+  callGlyph: { color: colors.card, fontSize: 16 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
-  infoRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.md, paddingVertical: 4 },
-  infoLabel: { color: "#4A6FA5", fontSize: 13 },
-  infoValue: { flex: 1, color: colors.mutedText, fontSize: 13, textAlign: "right" },
+  infoRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.md, paddingVertical: 3 },
+  infoLabel: { color: "#4A6FA5", fontSize: 12 },
+  infoValue: { flex: 1, color: colors.mutedText, fontSize: 12, textAlign: "right" },
   infoValueStrong: { color: colors.espresso, fontWeight: "700" },
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 18, fontWeight: "800" },
-  muted: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
-  hint: { color: "#4A6FA5", fontSize: 12, lineHeight: 17 },
-  itemRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs },
-  qtyBadge: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 18, backgroundColor: colors.cream },
-  qtyBadgeText: { color: colors.espresso, fontSize: 12, fontWeight: "700" },
-  itemCopy: { flex: 1, gap: 2 },
-  itemName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
-  itemTotal: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 16, fontWeight: "700" },
+  muted: { color: colors.mutedText, fontSize: 11, lineHeight: 16 },
+  hint: { color: "#4A6FA5", fontSize: 11, lineHeight: 16 },
+  itemRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 3 },
+  qtyBadge: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.cream },
+  qtyBadgeText: { color: colors.espresso, fontSize: 11, fontWeight: "700" },
+  itemCopy: { flex: 1, gap: 1 },
+  itemName: { color: colors.espresso, fontSize: 13, fontWeight: "600" },
+  itemTotal: { color: colors.espresso, fontSize: 13, fontWeight: "600" },
   itemTotals: { alignItems: "flex-end" },
-  struck: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },
-  saleText: { color: colors.sale, fontSize: 14, fontWeight: "700" },
+  struck: { color: colors.mutedText, fontSize: 11, textDecorationLine: "line-through" },
+  saleText: { color: colors.sale, fontSize: 13, fontWeight: "700" },
   linkBox: { gap: spacing.sm, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.parchment, padding: spacing.md },
   linkText: { color: colors.espresso, fontSize: 12, lineHeight: 17 },
   removeItemButton: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.parchment },

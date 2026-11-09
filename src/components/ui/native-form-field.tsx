@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { Host, TextInput as ExpoTextInput, useNativeState, type TextInputProps } from "@expo/ui";
 import {
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput as RNTextInput,
@@ -10,6 +9,7 @@ import {
   View,
 } from "react-native";
 
+import { Pressable } from "@/components/ui/pressable";
 import { NativeText } from "@/components/ui/native-text";
 import { colors, spacing } from "@/theme/tokens";
 

@@ -38,6 +38,18 @@ npx tsc --noEmit
 
 ## Discounts, invoices and customer approval
 
-1. Apply `supabase/migrations/20261103000000_add_discount_and_approval.sql` to your Supabase project.
+1. Apply the pending Supabase migrations in order, including `supabase/migrations/20261104062435_add_discount_and_approval.sql` and `supabase/migrations/20261104065559_approval_decline.sql`. Check the database's applied migration history first; do not blindly rerun historical migrations.
 2. Host the web build (`npx expo export -p web`, e.g. with EAS Hosting) and set `EXPO_PUBLIC_APPROVAL_BASE_URL` to its URL. Approval links look like `<base>/approve/<token>` and work without signing in.
 3. Push notifications need a development/production build on a physical device (not Expo Go); Android also needs FCM credentials configured in EAS.
+
+### Android push setup and testing
+
+The in-app notification inbox and native push notifications are separate. Native pushes require a working Firebase and Expo configuration, notification permission on the phone, a registered device token, and the relevant Supabase migrations.
+
+1. In Firebase, create or select a project and register an Android app with package name `com.forgepointlab.therisingdoughadminmobile`. Download its `google-services.json` and place it in the project root.
+2. Add `"googleServicesFile": "./google-services.json"` under `expo.android` in `app.json`, then create and install a new Android development, preview, or production build. An existing installed build cannot acquire this native configuration through an over-the-air update.
+3. Configure an FCM V1 service-account key in the Expo project's Android credentials. Follow [Expo's FCM setup guide](https://docs.expo.dev/push-notifications/fcm-credentials/). Keep the service-account private key out of the repository and never put it in the app or chat.
+4. Open the installed app on the phone, sign in as the owner, and allow notifications. Check Android's app notification settings and the Order updates channel if permission was denied.
+5. Use the [Expo push notifications tool](https://expo.dev/notifications) with the device's Expo push token to test delivery independently of Supabase. Retrieve the token for the signed-in owner from `admin_push_tokens` in Supabase; treat it as private. Then test a real approval or website request. An in-app inbox entry alone does not confirm push delivery.
+
+Expo accepting a push request does not guarantee delivery: inspect Expo push receipts and FCM credentials if the test fails. The database triggers send pushes through `pg_net`, so an Expo test that works but a real event that does not also requires checking the applied trigger migrations, database logs, and the owner's stored tokens.

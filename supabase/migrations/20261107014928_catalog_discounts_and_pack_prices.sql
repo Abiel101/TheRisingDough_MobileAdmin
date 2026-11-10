@@ -1,7 +1,10 @@
 alter table public.admin_products
-  add column discount_type text,
-  add column discount_value numeric(10, 2) not null default 0,
-  add column pricing_options jsonb not null default '[]'::jsonb,
+  add column if not exists discount_type text,
+  add column if not exists discount_value numeric(10, 2) not null default 0,
+  add column if not exists pricing_options jsonb not null default '[]'::jsonb,
+  drop constraint if exists admin_products_discount_type_check,
+  drop constraint if exists admin_products_discount_value_check,
+  drop constraint if exists admin_products_pricing_options_array_check,
   add constraint admin_products_discount_type_check
     check (discount_type is null or discount_type in ('percent', 'amount')),
   add constraint admin_products_discount_value_check
@@ -13,7 +16,7 @@ alter table public.admin_products
   add constraint admin_products_pricing_options_array_check
     check (jsonb_typeof(pricing_options) = 'array');
 
-create table public.admin_catalog_promotions (
+create table if not exists public.admin_catalog_promotions (
   owner_id uuid primary key references auth.users (id) on delete cascade,
   name text not null default 'Holiday promotion',
   is_active boolean not null default false,
@@ -28,14 +31,20 @@ alter table public.admin_catalog_promotions enable row level security;
 revoke all on public.admin_catalog_promotions from anon, authenticated;
 grant select, insert, update on public.admin_catalog_promotions to authenticated;
 
+drop policy if exists "Owners can read their catalog promotion"
+  on public.admin_catalog_promotions;
 create policy "Owners can read their catalog promotion"
   on public.admin_catalog_promotions for select to authenticated
   using (auth.uid() = owner_id);
 
+drop policy if exists "Owners can create their catalog promotion"
+  on public.admin_catalog_promotions;
 create policy "Owners can create their catalog promotion"
   on public.admin_catalog_promotions for insert to authenticated
   with check (auth.uid() = owner_id);
 
+drop policy if exists "Owners can update their catalog promotion"
+  on public.admin_catalog_promotions;
 create policy "Owners can update their catalog promotion"
   on public.admin_catalog_promotions for update to authenticated
   using (auth.uid() = owner_id)

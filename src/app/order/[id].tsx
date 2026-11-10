@@ -40,6 +40,7 @@ import {
   addItemsToOrder,
   deleteOrder,
   getOrder,
+  getCatalogPromotion,
   listProducts,
   removeOrderItems,
   updateOrder,
@@ -49,6 +50,7 @@ import {
 import { markApprovalRead } from "@/lib/approval-inbox";
 import { MANAGER_PASSWORD } from "@/lib/manager";
 import { colors, spacing } from "@/theme/tokens";
+import { DEFAULT_CATALOG_PROMOTION } from "@/domain/catalog-pricing";
 
 const ADD_ITEMS_CUTOFF_DAYS = 3;
 const serif = Platform.select({ ios: "Georgia", android: "serif", default: "serif" });
@@ -112,6 +114,7 @@ export default function OrderDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [promotion, setPromotion] = useState(DEFAULT_CATALOG_PROMOTION);
   const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [paymentMethodChoice, setPaymentMethodChoice] = useState<PaymentMethod>("cash");
@@ -151,8 +154,11 @@ export default function OrderDetailScreen() {
   }, [load]);
 
   useEffect(() => {
-    listProducts()
-      .then(setProducts)
+    Promise.all([listProducts(), getCatalogPromotion()])
+      .then(([nextProducts, nextPromotion]) => {
+        setProducts(nextProducts);
+        setPromotion(nextPromotion);
+      })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load catalog items."));
   }, []);
 
@@ -203,7 +209,7 @@ export default function OrderDetailScreen() {
 
   async function handleAddItems() {
     if (!order || !session?.user.id) return;
-    const items = selectedItemsFromQuantities(products, itemQuantities);
+    const items = selectedItemsFromQuantities(products, itemQuantities, promotion);
     if (!items.length) return;
     const ownerId = session.user.id;
     if (await run(async () => {
@@ -655,6 +661,7 @@ export default function OrderDetailScreen() {
               disabled={saving}
               onChange={(key, quantity) => setItemQuantities((current) => ({ ...current, [key]: quantity }))}
               products={products}
+              promotion={promotion}
               quantities={itemQuantities}
             />
             <Pressable
@@ -870,7 +877,6 @@ const styles = StyleSheet.create({
   infoValue: { flex: 1, color: colors.mutedText, fontSize: 12, textAlign: "right" },
   infoValueStrong: { color: colors.espresso, fontWeight: "700" },
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-<<<<<<< HEAD
   sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 16, fontWeight: "700" },
   muted: { color: colors.mutedText, fontSize: 11, lineHeight: 16 },
   hint: { color: "#4A6FA5", fontSize: 11, lineHeight: 16 },
@@ -883,13 +889,6 @@ const styles = StyleSheet.create({
   itemTotals: { alignItems: "flex-end" },
   struck: { color: colors.mutedText, fontSize: 11, textDecorationLine: "line-through" },
   saleText: { color: colors.sale, fontSize: 13, fontWeight: "700" },
-=======
-  sectionTitle: { color: colors.espresso, fontFamily: serif, fontSize: 18, fontWeight: "800" },
-  muted: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
-  hint: { color: "#4A6FA5", fontSize: 12, lineHeight: 17 },
-  itemCopy: { flex: 1, gap: 2 },
-  saleText: { color: colors.sale, fontSize: 14, fontWeight: "700" },
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   linkBox: { gap: spacing.sm, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.parchment, padding: spacing.md },
   linkText: { color: colors.espresso, fontSize: 12, lineHeight: 17 },
   removeItemText: { color: colors.brick, fontSize: 12, fontWeight: "700" },

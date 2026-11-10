@@ -1,8 +1,5 @@
 import { supabase } from "@/lib/supabase";
-<<<<<<< HEAD
-import type { ApprovalStatus, Discount, DiscountType, OrderStatus, PaymentMethod } from "@/domain/orders";
 import { DEFAULT_CATALOG_PROMOTION, parsePriceOptions, type CatalogDiscount, type CatalogPriceOption, type CatalogPromotion } from "@/domain/catalog-pricing";
-=======
 import {
   DEFAULT_OPTION_NAME,
   extractOptionName,
@@ -14,7 +11,6 @@ import {
   type OrderStatus,
   type PaymentMethod,
 } from "@/domain/orders";
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 
 export type CustomerRecord = {
   id: string;
@@ -25,19 +21,16 @@ export type CustomerRecord = {
   createdAt: string;
 };
 
-<<<<<<< HEAD
+/** `price` is null when the option uses the catalog item's own price. */
+export type ProductOption = { id: string; name: string; price: number | null };
 export type ProductRecord = {
   id: string;
   name: string;
   price: number;
   discount: CatalogDiscount;
   pricingOptions: CatalogPriceOption[];
+  options: ProductOption[];
 };
-=======
-/** `price` is null when the option uses the catalog item's own price. */
-export type ProductOption = { id: string; name: string; price: number | null };
-export type ProductRecord = { id: string; name: string; price: number; options: ProductOption[] };
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 export type OrderLine = {
   id: string;
   productId: string;
@@ -47,10 +40,7 @@ export type OrderLine = {
   price: number;
   quantity: number;
 };
-<<<<<<< HEAD
-export type OrderItemInput = { product: ProductRecord; quantity: number; itemName?: string; unitPrice?: number };
-=======
-export type OrderItemInput = { product: ProductRecord; option?: ProductOption | null; quantity: number };
+export type OrderItemInput = { product: ProductRecord; option?: ProductOption | null; quantity: number; itemName?: string; unitPrice?: number };
 
 /** Lowest and highest price a customer can pay for an item across its options. */
 export function productPriceRange(product: ProductRecord): { min: number; max: number } {
@@ -63,7 +53,6 @@ export function productPriceRange(product: ProductRecord): { min: number; max: n
 export function optionUnitPrice(product: ProductRecord, option?: ProductOption | null): number {
   return option?.price ?? product.price;
 }
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 export type OrderRecord = {
   id: string;
   number: string;
@@ -100,7 +89,6 @@ type CustomerRow = {
   address: string | null;
   created_at: string;
 };
-<<<<<<< HEAD
 type ProductRow = {
   id: string;
   name: string;
@@ -108,15 +96,13 @@ type ProductRow = {
   discount_type?: "percent" | "amount" | null;
   discount_value?: number | string | null;
   pricing_options?: unknown;
-=======
-type ProductRow = { id: string; name: string; unit_price: number | string };
+};
 type ProductOptionRow = {
   id: string;
   product_id: string;
   name: string;
   unit_price: number | string | null;
   sort_order: number;
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 };
 type OrderRow = {
   id: string;
@@ -169,7 +155,16 @@ function mapOption(row: ProductOptionRow): ProductOption {
 }
 
 function mapProduct(row: ProductRow, options: ProductOption[] = []): ProductRecord {
-  return { id: row.id, name: row.name, price: Number(row.unit_price), options };
+  return {
+    id: row.id,
+    name: row.name,
+    price: Number(row.unit_price),
+    discount: row.discount_type && Number(row.discount_value) > 0
+      ? { type: row.discount_type, value: Number(row.discount_value) }
+      : null,
+    pricingOptions: parsePriceOptions(row.pricing_options),
+    options,
+  };
 }
 
 async function listOptionRows(productIds?: string[]): Promise<ProductOptionRow[]> {
@@ -288,37 +283,14 @@ export async function addCustomer(
   return mapCustomer(data as CustomerRow);
 }
 
-<<<<<<< HEAD
-function mapProduct(row: ProductRow): ProductRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    price: Number(row.unit_price),
-    discount: row.discount_type && Number(row.discount_value) > 0
-      ? { type: row.discount_type, value: Number(row.discount_value) }
-      : null,
-    pricingOptions: parsePriceOptions(row.pricing_options),
-  };
-}
-
-export async function listProducts(): Promise<ProductRecord[]> {
-  const { data, error } = await supabase
-    .from("admin_products")
-    .select("id,name,unit_price,discount_type,discount_value,pricing_options")
-    .order("name", { ascending: true })
-    .limit(500);
-  throwIfError(error);
-  return ((data ?? []) as ProductRow[]).map(mapProduct);
-=======
 export async function listProducts(): Promise<ProductRecord[]> {
   const [{ data, error }, optionRows] = await Promise.all([
-    supabase.from("admin_products").select("id,name,unit_price").order("name", { ascending: true }).limit(500),
+    supabase.from("admin_products").select("id,name,unit_price,discount_type,discount_value,pricing_options").order("name", { ascending: true }).limit(500),
     listOptionRows(),
   ]);
   throwIfError(error);
   const optionsByProduct = groupOptions(optionRows);
   return ((data ?? []) as ProductRow[]).map((row) => mapProduct(row, optionsByProduct.get(row.id)));
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 }
 
 export async function getProduct(id: string): Promise<ProductRecord | null> {
@@ -329,9 +301,8 @@ export async function getProduct(id: string): Promise<ProductRecord | null> {
     .maybeSingle();
   throwIfError(error);
   if (!data) return null;
-<<<<<<< HEAD
-  const row = data as ProductRow;
-  return mapProduct(row);
+  const optionRows = await listOptionRows([id]);
+  return mapProduct(data as ProductRow, groupOptions(optionRows).get(id));
 }
 
 export async function updateProductPricing(
@@ -377,9 +348,7 @@ export async function saveCatalogPromotion(ownerId: string, promotion: CatalogPr
     stack_on_product_discount: promotion.stackOnProductDiscount,
     updated_at: new Date().toISOString(),
   }, { onConflict: "owner_id" });
-=======
-  const optionRows = await listOptionRows([id]);
-  return mapProduct(data as ProductRow, groupOptions(optionRows).get(id));
+  throwIfError(error);
 }
 
 export type ProductOptionInput = { name: string; price: number | null };
@@ -424,7 +393,6 @@ export async function addProductOption(
 
 export async function removeProductOption(id: string): Promise<void> {
   const { error } = await supabase.from("admin_product_options").delete().eq("id", id);
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   throwIfError(error);
 }
 
@@ -443,9 +411,6 @@ export async function addProduct(
   throwIfError(error);
   if (!data) throw new Error("Supabase returned no catalog item.");
   const row = data as ProductRow;
-<<<<<<< HEAD
-  return mapProduct(row);
-=======
   if (!cleaned.length) return mapProduct(row);
 
   const { data: optionData, error: optionError } = await supabase
@@ -464,7 +429,6 @@ export async function addProduct(
     throwIfError(optionError);
   }
   return mapProduct(row, ((optionData ?? []) as ProductOptionRow[]).map(mapOption));
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 }
 
 export async function removeProduct(id: string): Promise<void> {
@@ -678,29 +642,19 @@ function validateOrderItems(items: OrderItemInput[]) {
 }
 
 async function insertOrderItems(ownerId: string, orderId: string, items: OrderItemInput[]) {
-  const rows = items.map(({ product, option, quantity }) => ({
+  const rows = items.map(({ product, option, quantity, itemName, unitPrice }) => ({
     owner_id: ownerId,
     order_id: orderId,
     catalog_product_id: product.id,
-    item_name: product.name,
-    unit_price: optionUnitPrice(product, option),
+    item_name: itemName ?? product.name,
+    unit_price: unitPrice ?? optionUnitPrice(product, option),
     quantity,
   }));
   const { error } = await supabase.from("admin_order_items").insert(
-<<<<<<< HEAD
-    items.map(({ product, quantity, itemName, unitPrice }) => ({
-      owner_id: ownerId,
-      order_id: orderId,
-      catalog_product_id: product.id,
-      item_name: itemName ?? product.name,
-      unit_price: unitPrice ?? product.price,
-      quantity,
-=======
     rows.map((row, index) => ({
       ...row,
       catalog_option_id: items[index].option?.id ?? null,
       option_name: items[index].option?.name ?? DEFAULT_OPTION_NAME,
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
     })),
   );
   if (!isMissingPaymentColumn(error)) {
@@ -715,8 +669,8 @@ async function insertOrderItems(ownerId: string, orderId: string, items: OrderIt
   throwIfError(fallbackError);
 }
 
-const lineKey = (productId: string | null, optionName: string | null | undefined, price: number | string) =>
-  `${productId ?? ""}:${(optionName?.trim() || DEFAULT_OPTION_NAME).toLocaleLowerCase()}:${Number(price)}`;
+const lineKey = (productId: string | null, itemName: string, optionName: string | null | undefined, price: number | string) =>
+  JSON.stringify([productId, itemName, optionName?.trim() || DEFAULT_OPTION_NAME, Number(price)]);
 
 export async function createOrder(input: {
   ownerId: string;
@@ -769,42 +723,24 @@ export async function addItemsToOrder(
   items: OrderItemInput[],
 ): Promise<void> {
   validateOrderItems(items);
-<<<<<<< HEAD
-  const { data, error } = await supabase
-    .from("admin_order_items")
-    .select("id,catalog_product_id,item_name,unit_price,quantity")
-    .eq("order_id", orderId);
-=======
   const query = (columns: string) =>
     supabase.from("admin_order_items").select(columns).eq("order_id", orderId);
-  let { data, error } = await query("id,catalog_product_id,option_name,unit_price,quantity");
-  if (isMissingPaymentColumn(error)) ({ data, error } = await query("id,catalog_product_id,unit_price,quantity"));
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
+  let { data, error } = await query("id,catalog_product_id,item_name,option_name,unit_price,quantity");
+  if (isMissingPaymentColumn(error)) ({ data, error } = await query("id,catalog_product_id,item_name,unit_price,quantity"));
   throwIfError(error);
   const current = (data ?? []) as unknown as {
     id: string;
     catalog_product_id: string | null;
-<<<<<<< HEAD
     item_name: string;
-    unit_price: number | string;
-    quantity: number;
-  }[];
-  const nextItems = new Map(current.map((item) => [`${item.catalog_product_id ?? ""}:${item.item_name}:${Number(item.unit_price)}`, item]));
-  const newItems: OrderItemInput[] = [];
-
-  for (const input of items) {
-    const key = `${input.product.id}:${input.itemName ?? input.product.name}:${input.unitPrice ?? input.product.price}`;
-=======
     option_name?: string | null;
     unit_price: number | string;
     quantity: number;
   }[];
-  const nextItems = new Map(current.map((item) => [lineKey(item.catalog_product_id, item.option_name, item.unit_price), item]));
+  const nextItems = new Map(current.map((item) => [lineKey(item.catalog_product_id, item.item_name, item.option_name, item.unit_price), item]));
   const newItems: OrderItemInput[] = [];
 
   for (const input of items) {
-    const key = lineKey(input.product.id, input.option?.name, optionUnitPrice(input.product, input.option));
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
+    const key = lineKey(input.product.id, input.itemName ?? input.product.name, input.option?.name, input.unitPrice ?? optionUnitPrice(input.product, input.option));
     const existing = nextItems.get(key);
     if (!existing) {
       newItems.push(input);

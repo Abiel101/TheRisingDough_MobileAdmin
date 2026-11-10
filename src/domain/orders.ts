@@ -120,7 +120,7 @@ export function groupLinesByItem<T extends { productId?: string; name: string; o
 ): LineGroup<T>[] {
   const groups = new Map<string, LineGroup<T>>();
   lines.forEach((line, index) => {
-    const key = line.productId || line.name.trim().toLocaleLowerCase();
+    const key = JSON.stringify([line.productId ?? "", line.name.trim().toLocaleLowerCase()]);
     const group = groups.get(key) ?? { key, name: line.name, entries: [], quantity: 0, showOptions: false };
     group.entries.push({ line, index });
     group.quantity += line.quantity;

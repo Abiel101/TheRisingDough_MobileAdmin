@@ -1,25 +1,17 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { optionUnitPrice, type OrderItemInput, type ProductOption, type ProductRecord } from "@/lib/workspace";
+import { catalogChoicePrice, catalogChoices } from "@/domain/catalog-choices";
+import { DEFAULT_CATALOG_PROMOTION, type CatalogPromotion } from "@/domain/catalog-pricing";
+import type { OrderItemInput, ProductRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 export type QuantityMap = Record<string, number>;
 
-/** Quantity key for one orderable line: an item, or one option of an item. */
-export function lineQuantityKey(productId: string, optionId?: string | null) {
-  return `${productId}:${optionId ?? ""}`;
-}
-
-/** Orderable lines for an item: each option when it has any, otherwise the item itself. */
-export function orderableOptions(product: ProductRecord): (ProductOption | null)[] {
-  return product.options.length ? product.options : [null];
-}
-
-export function selectedItemsFromQuantities(products: readonly ProductRecord[], quantities: QuantityMap): OrderItemInput[] {
+export function selectedItemsFromQuantities(products: readonly ProductRecord[], quantities: QuantityMap, promotion: CatalogPromotion): OrderItemInput[] {
   return products.flatMap((product) =>
-    orderableOptions(product).flatMap((option) => {
-      const quantity = quantities[lineQuantityKey(product.id, option?.id)] ?? 0;
-      return quantity > 0 ? [{ product, option, quantity }] : [];
+    catalogChoices(product).flatMap((choice) => {
+      const quantity = quantities[choice.key] ?? 0;
+      return quantity > 0 ? [{ product, option: choice.option, itemName: choice.itemName, unitPrice: catalogChoicePrice(choice, promotion), quantity }] : [];
     }),
   );
 }
@@ -33,37 +25,37 @@ type ItemPickerProps = {
   quantities: QuantityMap;
   onChange: (key: string, quantity: number) => void;
   disabled?: boolean;
-  /** Discounted line totals keyed by lineQuantityKey, shown next to a struck-through original. */
-  discountedTotals?: ReadonlyMap<string, number>;
+  promotion?: CatalogPromotion;
 };
 
-export function ItemPicker({ products, quantities, onChange, disabled, discountedTotals }: ItemPickerProps) {
+export function ItemPicker({ products, quantities, onChange, disabled, promotion = DEFAULT_CATALOG_PROMOTION }: ItemPickerProps) {
   return (
     <>
       {products.map((product) => {
-        const hasOptions = product.options.length > 0;
+        const choices = catalogChoices(product);
+        const hasOptions = choices.length > 1 || product.options.length > 0;
         return (
           <View key={product.id} style={styles.group}>
             {hasOptions ? (
               <View style={styles.groupHeader}>
                 <Text style={styles.name}>{product.name}</Text>
-                <Text style={styles.hint}>{product.options.length} option{product.options.length === 1 ? "" : "s"}</Text>
+                <Text style={styles.hint}>{choices.length} choice{choices.length === 1 ? "" : "s"}</Text>
               </View>
             ) : null}
-            {orderableOptions(product).map((option) => {
-              const key = lineQuantityKey(product.id, option?.id);
+            {choices.map((choice) => {
+              const key = choice.key;
               const quantity = quantities[key] ?? 0;
-              const price = optionUnitPrice(product, option);
-              const label = option?.name ?? product.name;
-              const discounted = discountedTotals?.get(key);
+              const price = catalogChoicePrice(choice, promotion);
+              const original = choice.originalCents / 100;
+              const label = hasOptions ? choice.label : product.name;
               return (
                 <View key={key} style={[styles.row, hasOptions && styles.optionRow]}>
                   <View style={styles.copy}>
                     <Text numberOfLines={2} style={hasOptions ? styles.optionName : styles.name}>{label}</Text>
-                    {quantity > 0 && discounted !== undefined && discounted < price * quantity ? (
+                    {price < original ? (
                       <View style={styles.priceRow}>
-                        <Text style={styles.struck}>{formatCurrency(price * quantity)}</Text>
-                        <Text style={styles.sale}>{formatCurrency(discounted)}</Text>
+                        <Text style={styles.struck}>{formatCurrency(original)}</Text>
+                        <Text style={styles.sale}>{formatCurrency(price)}</Text>
                       </View>
                     ) : (
                       <Text style={styles.hint}>{formatCurrency(price)}</Text>

@@ -6,21 +6,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
-<<<<<<< HEAD
-import { getCatalogPromotion, listProducts, type ProductRecord } from "@/lib/workspace";
+import { getCatalogPromotion, listProducts, productPriceRange, type ProductRecord } from "@/lib/workspace";
 import { DEFAULT_CATALOG_PROMOTION, getCatalogUnitPriceCents, type CatalogPromotion } from "@/domain/catalog-pricing";
-=======
-import { listProducts, productPriceRange, type ProductRecord } from "@/lib/workspace";
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
 }
 
-function formatPrice(product: ProductRecord) {
+function formatPrice(product: ProductRecord, promotion: CatalogPromotion) {
   const { min, max } = productPriceRange(product);
-  return min === max ? formatCurrency(min) : `${formatCurrency(min)} – ${formatCurrency(max)}`;
+  const discountedMin = getCatalogUnitPriceCents(min, product.discount, promotion) / 100;
+  const discountedMax = getCatalogUnitPriceCents(max, product.discount, promotion) / 100;
+  return discountedMin === discountedMax ? formatCurrency(discountedMin) : `${formatCurrency(discountedMin)} – ${formatCurrency(discountedMax)}`;
 }
 
 export default function CatalogScreen() {
@@ -92,7 +90,7 @@ export default function CatalogScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
         renderItem={({ item, index }) => (
           <Pressable
-            accessibilityLabel={`View ${item.name} catalog details, ${formatPrice(item)}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
+            accessibilityLabel={`View ${item.name} catalog details, ${formatPrice(item, promotion ?? DEFAULT_CATALOG_PROMOTION)}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
             accessibilityRole="button"
             onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
             style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
@@ -100,25 +98,20 @@ export default function CatalogScreen() {
             <Avatar index={index} name={item.name} />
             <View style={styles.productCopy}>
               <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
-<<<<<<< HEAD
               {(() => {
-                const currentCents = getCatalogUnitPriceCents(item.price, item.discount, promotion ?? DEFAULT_CATALOG_PROMOTION);
-                const currentPrice = currentCents / 100;
+                const original = formatPrice(item, DEFAULT_CATALOG_PROMOTION);
+                const current = formatPrice(item, promotion ?? DEFAULT_CATALOG_PROMOTION);
                 return (
                   <View style={styles.priceRow}>
-                    {currentPrice < item.price ? <Text style={styles.struckPrice}>{formatCurrency(item.price)}</Text> : null}
-                    <Text style={[styles.productPrice, currentPrice < item.price && styles.salePrice]}>{formatCurrency(currentPrice)}</Text>
+                    <Text style={[styles.productPrice, (current !== original || item.discount) && styles.salePrice]}>{current}</Text>
                     {item.discount ? <Text style={styles.productMeta}>{item.discount.type === "percent" ? `${item.discount.value}% item discount` : `$${item.discount.value.toFixed(2)} item discount`}</Text> : null}
                   </View>
                 );
               })()}
-              {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
-=======
               {item.options.length ? (
                 <Text numberOfLines={2} style={styles.optionSummary}>{item.options.map((option) => option.name).join(" · ")}</Text>
               ) : null}
-              <Text style={styles.productPrice}>{formatPrice(item)}</Text>
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
+              {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
             </View>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
@@ -146,7 +139,6 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.76 },
   productCopy: { flex: 1, minWidth: 0, gap: 3 },
-<<<<<<< HEAD
   productName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   productPrice: { color: colors.mutedText, fontSize: 12 },
   priceRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: spacing.xs },
@@ -156,10 +148,6 @@ const styles = StyleSheet.create({
   promotionButton: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.teal, backgroundColor: colors.card, padding: spacing.md },
   promotionTitle: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   promotionCopy: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
-=======
-  productName: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
   optionSummary: { color: colors.mutedText, fontSize: 12, lineHeight: 16 },
-  productPrice: { color: colors.mutedText, fontSize: 13 },
->>>>>>> 385fd99c4f68ff36c8e733b0b7c2ade06c23a794
   chevron: { color: colors.teal, fontSize: 25, lineHeight: 26 },
 });

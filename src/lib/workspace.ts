@@ -95,6 +95,7 @@ type ProductRow = {
   unit_price: number | string;
   discount_type?: "percent" | "amount" | null;
   discount_value?: number | string | null;
+  discount_ends_on?: string | null;
   pricing_options?: unknown;
 };
 type ProductOptionRow = {
@@ -155,16 +156,40 @@ function mapOption(row: ProductOptionRow): ProductOption {
 }
 
 function mapProduct(row: ProductRow, options: ProductOption[] = []): ProductRecord {
+  const discountEndsOn = row.discount_ends_on ?? null;
+  const discountExpired = Boolean(discountEndsOn && discountEndsOn < localDateKey());
   return {
     id: row.id,
     name: row.name,
     price: Number(row.unit_price),
-    discount: row.discount_type && Number(row.discount_value) > 0
-      ? { type: row.discount_type, value: Number(row.discount_value) }
+    discount: !discountExpired && row.discount_type && Number(row.discount_value) > 0
+      ? { type: row.discount_type, value: Number(row.discount_value), endsOn: discountEndsOn }
       : null,
     pricingOptions: parsePriceOptions(row.pricing_options),
     options,
   };
+}
+
+function localDateKey() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+async function clearExpiredProductDiscounts(rows: ProductRow[]) {
+  const expired = rows.filter((row) =>
+    Boolean(row.discount_type && row.discount_ends_on && row.discount_ends_on < localDateKey()),
+  );
+  await Promise.all(expired.map(async (row) => {
+    const { error } = await supabase
+      .from("admin_products")
+      .update({ discount_type: null, discount_value: 0, discount_ends_on: null })
+      .eq("id", row.id)
+      .eq("discount_type", row.discount_type)
+      .eq("discount_value", row.discount_value ?? 0)
+      .eq("discount_ends_on", row.discount_ends_on!);
+    throwIfError(error);
+  }));
 }
 
 async function listOptionRows(productIds?: string[]): Promise<ProductOptionRow[]> {
@@ -284,25 +309,49 @@ export async function addCustomer(
 }
 
 export async function listProducts(): Promise<ProductRecord[]> {
-  const [{ data, error }, optionRows] = await Promise.all([
-    supabase.from("admin_products").select("id,name,unit_price,discount_type,discount_value,pricing_options").order("name", { ascending: true }).limit(500),
-    listOptionRows(),
-  ]);
+  const optionRowsPromise = listOptionRows();
+  const initial = await supabase
+    .from("admin_products")
+    .select("id,name,unit_price,discount_type,discount_value,discount_ends_on,pricing_options")
+    .order("name", { ascending: true })
+    .limit(500);
+  let rows = (initial.data ?? []) as ProductRow[];
+  let error = initial.error;
+  if (isMissingPaymentColumn(error)) {
+    const fallback = await supabase
+      .from("admin_products")
+      .select("id,name,unit_price,discount_type,discount_value,pricing_options")
+      .order("name", { ascending: true })
+      .limit(500);
+    rows = (fallback.data ?? []) as ProductRow[];
+    error = fallback.error;
+  }
   throwIfError(error);
+  const optionRows = await optionRowsPromise;
+  await clearExpiredProductDiscounts(rows);
   const optionsByProduct = groupOptions(optionRows);
-  return ((data ?? []) as ProductRow[]).map((row) => mapProduct(row, optionsByProduct.get(row.id)));
+  return rows.map((row) => mapProduct(row, optionsByProduct.get(row.id)));
 }
 
 export async function getProduct(id: string): Promise<ProductRecord | null> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("admin_products")
-    .select("id,name,unit_price,discount_type,discount_value,pricing_options")
+    .select("id,name,unit_price,discount_type,discount_value,discount_ends_on,pricing_options")
     .eq("id", id)
     .maybeSingle();
+  if (isMissingPaymentColumn(error)) {
+    ({ data, error } = await supabase
+      .from("admin_products")
+      .select("id,name,unit_price,discount_type,discount_value,pricing_options")
+      .eq("id", id)
+      .maybeSingle());
+  }
   throwIfError(error);
   if (!data) return null;
+  const row = data as ProductRow;
+  await clearExpiredProductDiscounts([row]);
   const optionRows = await listOptionRows([id]);
-  return mapProduct(data as ProductRow, groupOptions(optionRows).get(id));
+  return mapProduct(row, groupOptions(optionRows).get(id));
 }
 
 export async function updateProductPricing(
@@ -314,6 +363,7 @@ export async function updateProductPricing(
     .update({
       discount_type: input.discount?.type ?? null,
       discount_value: input.discount?.value ?? 0,
+      discount_ends_on: input.discount?.endsOn ?? null,
       pricing_options: input.pricingOptions,
     })
     .eq("id", id)
@@ -351,7 +401,7 @@ export async function saveCatalogPromotion(ownerId: string, promotion: CatalogPr
   throwIfError(error);
 }
 
-export type ProductOptionInput = { name: string; price: number | null };
+export type ProductOptionInput = { name: string; price: number };
 
 function cleanOptionInputs(options: ProductOptionInput[]): ProductOptionInput[] {
   const seen = new Set<string>();
@@ -362,7 +412,7 @@ function cleanOptionInputs(options: ProductOptionInput[]): ProductOptionInput[] 
     if (!name) continue;
     if (!hasOptionLabel(name)) throw new Error(`“${name}” is reserved. Choose a different option name.`);
     if (seen.has(key)) throw new Error(`“${name}” is listed more than once.`);
-    if (option.price != null && (!Number.isFinite(option.price) || option.price < 0)) {
+    if (!Number.isFinite(option.price) || option.price < 0) {
       throw new Error(`Enter a price of zero or more for “${name}”.`);
     }
     seen.add(key);
@@ -403,6 +453,7 @@ export async function addProduct(
   options: ProductOptionInput[] = [],
 ): Promise<ProductRecord> {
   const cleaned = cleanOptionInputs(options);
+  if (!cleaned.length) throw new Error("Add at least one priced option for this catalog item.");
   const { data, error } = await supabase
     .from("admin_products")
     .insert({ owner_id: ownerId, name: name.trim(), unit_price: price })

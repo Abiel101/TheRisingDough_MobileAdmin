@@ -212,7 +212,9 @@ export function matchRequestedItem<P extends MatchableProduct>(
   for (const candidate of candidates) {
     const product = products.find((item) => normalize(item.name) === normalize(candidate.productName));
     if (!product) continue;
-    if (!hasOptionLabel(candidate.optionName)) return { product, option: null };
+    if (!hasOptionLabel(candidate.optionName)) {
+      return { product, option: product.options.length === 1 ? product.options[0] : null };
+    }
     const option = findOption(product, candidate.optionName);
     if (option) return { product, option };
   }

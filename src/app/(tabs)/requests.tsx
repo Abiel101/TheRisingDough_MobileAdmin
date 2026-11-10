@@ -123,8 +123,8 @@ export default function RequestsScreen() {
       <NativeSegmentedControl
         onChange={setView}
         options={[
-          { value: "New", label: `New (${requests.filter((request) => request.status === "pending").length})` },
-          { value: "Processed", label: `Processed (${requests.filter((request) => request.status === "converted").length})` },
+          { value: "New", label: "New" },
+          { value: "Processed", label: "Done" },
         ]}
         value={view}
       />

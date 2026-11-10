@@ -88,34 +88,36 @@ export default function CatalogScreen() {
         keyExtractor={(product) => product.id}
         ListHeaderComponent={header}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { setLoading(true); void load(); }} tintColor={colors.teal} />}
-        renderItem={({ item, index }) => (
-          <Pressable
-            accessibilityLabel={`View ${item.name} catalog details, ${formatPrice(item, promotion ?? DEFAULT_CATALOG_PROMOTION)}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
-            accessibilityRole="button"
-            onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
-            style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
-          >
-            <Avatar index={index} name={item.name} />
-            <View style={styles.productCopy}>
-              <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
-              {(() => {
-                const original = formatPrice(item, DEFAULT_CATALOG_PROMOTION);
-                const current = formatPrice(item, promotion ?? DEFAULT_CATALOG_PROMOTION);
-                return (
-                  <View style={styles.priceRow}>
-                    <Text style={[styles.productPrice, (current !== original || item.discount) && styles.salePrice]}>{current}</Text>
-                    {item.discount ? <Text style={styles.productMeta}>{item.discount.type === "percent" ? `${item.discount.value}% item discount` : `$${item.discount.value.toFixed(2)} item discount`}</Text> : null}
-                  </View>
-                );
-              })()}
-              {item.options.length ? (
-                <Text numberOfLines={2} style={styles.optionSummary}>{item.options.map((option) => option.name).join(" · ")}</Text>
-              ) : null}
-              {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
-            </View>
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-        )}
+        renderItem={({ item, index }) => {
+          const original = formatPrice(item, DEFAULT_CATALOG_PROMOTION);
+          const current = formatPrice(item, promotion ?? DEFAULT_CATALOG_PROMOTION);
+          const isDiscounted = current !== original;
+          return (
+            <Pressable
+              accessibilityLabel={`View ${item.name} catalog details, ${current}${isDiscounted ? ", discounted" : ""}${item.options.length ? `, options: ${item.options.map((option) => option.name).join(", ")}` : ""}`}
+              accessibilityRole="button"
+              onPress={() => router.push({ pathname: "/catalog/[id]", params: { id: item.id } })}
+              style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
+            >
+              <Avatar index={index} name={item.name} />
+              <View style={styles.productCopy}>
+                <View style={styles.nameRow}>
+                  <Text numberOfLines={2} style={styles.productName}>{item.name}</Text>
+                  {isDiscounted ? <View accessibilityLabel="Discounted" style={styles.discountDot} /> : null}
+                </View>
+                <View style={styles.priceRow}>
+                  <Text style={[styles.productPrice, isDiscounted && styles.salePrice]}>{current}</Text>
+                  {item.discount ? <Text style={styles.productMeta}>{item.discount.type === "percent" ? `${item.discount.value}% item discount` : `$${item.discount.value.toFixed(2)} item discount`}</Text> : null}
+                </View>
+                {item.options.length ? (
+                  <Text numberOfLines={2} style={styles.optionSummary}>{item.options.map((option) => option.name).join(" · ")}</Text>
+                ) : null}
+                {item.pricingOptions.length ? <Text style={styles.productMeta}>{item.pricingOptions.length} pack {item.pricingOptions.length === 1 ? "option" : "options"}</Text> : null}
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
+          );
+        }}
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
@@ -139,7 +141,9 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.76 },
   productCopy: { flex: 1, minWidth: 0, gap: 3 },
-  productName: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  productName: { flexShrink: 1, color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  discountDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.sale },
   productPrice: { color: colors.mutedText, fontSize: 12 },
   priceRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: spacing.xs },
   struckPrice: { color: colors.mutedText, fontSize: 12, textDecorationLine: "line-through" },

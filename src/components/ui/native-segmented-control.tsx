@@ -24,9 +24,9 @@ export function NativeSegmentedControl<T extends string>({ options, value, onCha
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", padding: 4, gap: 4, borderRadius: 16, borderWidth: 1.5, borderColor: colors.teal, backgroundColor: colors.card },
-  button: { flex: 1, minHeight: 40, alignItems: "center", justifyContent: "center", borderRadius: 12, paddingHorizontal: 4 },
+  row: { flexDirection: "row", padding: 3, gap: 3, borderRadius: 14, borderWidth: 1, borderColor: colors.teal, backgroundColor: colors.card },
+  button: { flex: 1, minHeight: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, paddingHorizontal: 3 },
   active: { backgroundColor: colors.teal },
-  label: { color: colors.espresso, fontSize: 13, fontWeight: "700", textAlign: "center" },
+  label: { color: colors.espresso, fontSize: 12, fontWeight: "700", textAlign: "center" },
   activeLabel: { color: colors.card },
 });

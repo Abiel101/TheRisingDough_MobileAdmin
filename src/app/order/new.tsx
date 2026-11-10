@@ -13,7 +13,7 @@ import { calculateOrderTotals, type DiscountType } from "@/domain/orders";
 import { catalogChoicePrice, catalogChoices, resolveCatalogRequest } from "@/domain/catalog-choices";
 import { findCustomerByPhone } from "@/domain/customers";
 import type { RequestedItem } from "@/domain/request-items";
-import { addCustomer, createOrder, getCatalogPromotion, listCustomers, listProducts, markHolidayRequestConverted, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
+import { addCustomer, createOrder, getCatalogPromotion, listCustomers, listProducts, markHolidayRequestConverted, productPriceRange, type CustomerRecord, type ProductRecord } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -90,6 +90,7 @@ export default function NewOrderScreen() {
   const [unmatchedRequestItems, setUnmatchedRequestItems] = useState<string[]>([]);
   const [itemQuery, setItemQuery] = useState("");
   const [pickedProductId, setPickedProductId] = useState("");
+  const [pickedOptionId, setPickedOptionId] = useState("");
   const [pickedChoiceKey, setPickedChoiceKey] = useState("");
   const [pickedQuantity, setPickedQuantity] = useState("1");
   const [loading, setLoading] = useState(true);
@@ -164,11 +165,20 @@ export default function NewOrderScreen() {
 
   const itemQueryText = itemQuery.trim().toLocaleLowerCase();
   const itemMatches = useMemo(
-    () => (itemQueryText ? products.filter((product) => product.name.toLocaleLowerCase().includes(itemQueryText)).slice(0, 8) : []),
+    () => (itemQueryText
+      ? products.filter((product) =>
+          [product.name, ...product.options.map((option) => option.name)]
+            .some((value) => value.toLocaleLowerCase().includes(itemQueryText)),
+        ).slice(0, 8)
+      : []),
     [itemQueryText, products],
   );
   const pickedProduct = products.find((product) => product.id === pickedProductId);
-  const pickedChoices = pickedProduct ? choices.filter((choice) => choice.product.id === pickedProduct.id) : [];
+  const pickedOptions = pickedProduct?.options ?? [];
+  const pickedOption = pickedOptions.find((option) => option.id === pickedOptionId) ?? pickedOptions[0];
+  const pickedChoices = pickedProduct
+    ? choices.filter((choice) => choice.product.id === pickedProduct.id && (choice.option?.id ?? "") === (pickedOption?.id ?? ""))
+    : [];
   const pickedChoice = pickedChoices.find((choice) => choice.key === pickedChoiceKey) ?? pickedChoices[0];
   const pickedCount = Math.floor(Number(pickedQuantity.replace(/\D/g, "")) || 0);
   const unitPriceOf = (choice: (typeof choices)[number]) =>
@@ -176,7 +186,18 @@ export default function NewOrderScreen() {
 
   function pickProduct(product: ProductRecord) {
     setPickedProductId(product.id);
-    setPickedChoiceKey("");
+    const firstOption = product.options[0];
+    setPickedOptionId(firstOption?.id ?? "");
+    setPickedChoiceKey(catalogChoices(product).find((choice) => (choice.option?.id ?? "") === (firstOption?.id ?? ""))?.key ?? "");
+    setPickedQuantity("1");
+  }
+
+  function pickOption(optionId: string) {
+    if (!pickedProduct) return;
+    setPickedOptionId(optionId);
+    setPickedChoiceKey(
+      catalogChoices(pickedProduct).find((choice) => (choice.option?.id ?? "") === optionId)?.key ?? "",
+    );
     setPickedQuantity("1");
   }
 
@@ -365,32 +386,55 @@ export default function NewOrderScreen() {
                 <Text style={styles.changeText}>Change</Text>
               </Pressable>
             </View>
-            {pickedChoices.length > 1 ? (
-              <View style={styles.chipRow}>
-                {pickedChoices.map((choice) => {
-                  const selected = choice.key === pickedChoice.key;
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      key={choice.key}
-                      onPress={() => setPickedChoiceKey(choice.key)}
-                      style={[styles.chip, selected && styles.chipSelected]}
-                    >
-                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{choice.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-            <View style={styles.priceRow}>
-              {unitPriceOf(pickedChoice) < pickedChoice.originalCents / 100 ? <Text style={styles.struck}>{formatCurrency(pickedChoice.originalCents / 100)}</Text> : null}
-              <Text style={[styles.pickPrice, unitPriceOf(pickedChoice) < pickedChoice.originalCents / 100 && styles.sale]}>
-                {formatCurrency(unitPriceOf(pickedChoice))} each
-              </Text>
+            <Text style={styles.fieldLabel}>Option</Text>
+            <View style={styles.optionChoices}>
+              {pickedOptions.map((option) => {
+                const selected = option.id === pickedOption?.id;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    key={option.id}
+                    onPress={() => pickOption(option.id)}
+                    style={[styles.optionChoice, selected && styles.optionChoiceSelected]}
+                  >
+                    <Text style={[styles.optionChoiceName, selected && styles.optionChoiceNameSelected]}>{option.name}</Text>
+                    <Text style={[styles.optionChoicePrice, selected && styles.optionChoiceNameSelected]}>
+                      {formatCurrency(option.price ?? pickedProduct.price)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.fieldLabel}>Size and price</Text>
+            <View style={styles.sizeChoices}>
+              {pickedChoices.map((choice) => {
+                const selected = choice.key === pickedChoice.key;
+                const price = unitPriceOf(choice);
+                const discounted = price < choice.originalCents / 100;
+                const optionPrefix = pickedOption ? `${pickedOption.name} · ` : "";
+                const label = optionPrefix && choice.label.startsWith(optionPrefix)
+                  ? choice.label.slice(optionPrefix.length)
+                  : choice.label;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    key={choice.key}
+                    onPress={() => { setPickedChoiceKey(choice.key); setPickedQuantity("1"); }}
+                    style={[styles.sizeChoice, selected && styles.sizeChoiceSelected]}
+                  >
+                    <Text style={[styles.sizeChoiceLabel, selected && styles.sizeChoiceLabelSelected]}>{label}</Text>
+                    <View style={styles.priceRow}>
+                      {discounted ? <Text style={styles.struck}>{formatCurrency(choice.originalCents / 100)}</Text> : null}
+                      <Text style={[styles.pickPrice, discounted && styles.sale]}>{formatCurrency(price)}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
             <View style={styles.pickControls}>
-              <Text style={styles.fieldLabel}>Quantity</Text>
+              <Text style={styles.fieldLabel}>{pickedChoice.label.includes("pieces") ? "Packs" : "Quantity"}</Text>
               <View style={styles.stepper}>
                 <Pressable accessibilityLabel="One fewer" disabled={pickedCount <= 1} onPress={() => setPickedQuantity(String(Math.max(pickedCount - 1, 1)))} style={styles.quantityButton}><Text style={styles.quantitySymbol}>−</Text></Pressable>
                 <TextInput
@@ -413,7 +457,10 @@ export default function NewOrderScreen() {
               <Pressable key={product.id} onPress={() => pickProduct(product)} style={styles.customerResult}>
                 <Text style={styles.customerName}>{product.name}</Text>
                 <Text style={styles.hint}>
-                  {formatCurrency(product.price)}{product.pricingOptions.length ? ` · ${product.pricingOptions.map((option) => option.label).join(" / ")} available` : ""}
+                  {product.options.map((option) => option.name).join(" · ") || "Regular"}
+                  {" · "}
+                  {formatCurrency(productPriceRange(product).min)}
+                  {product.pricingOptions.length ? ` · ${product.pricingOptions.map((option) => option.label).join(" / ")}` : ""}
                 </Text>
               </Pressable>
             ))}
@@ -522,6 +569,17 @@ const styles = StyleSheet.create({
   pickHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
   pickTitle: { flex: 1, color: colors.espresso, fontSize: 17, fontWeight: "700" },
   pickPrice: { color: colors.espresso, fontSize: 14, fontWeight: "600" },
+  optionChoices: { gap: spacing.xs },
+  optionChoice: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.card, paddingHorizontal: spacing.md },
+  optionChoiceSelected: { borderColor: colors.teal, backgroundColor: "#EAF4F2" },
+  optionChoiceName: { flex: 1, color: colors.espresso, fontSize: 13, fontWeight: "600" },
+  optionChoiceNameSelected: { color: colors.teal, fontWeight: "700" },
+  optionChoicePrice: { color: colors.mutedText, fontSize: 12, fontWeight: "600" },
+  sizeChoices: { gap: spacing.xs },
+  sizeChoice: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.card, paddingHorizontal: spacing.md },
+  sizeChoiceSelected: { borderColor: colors.orange, backgroundColor: "#FFF4E8" },
+  sizeChoiceLabel: { flex: 1, color: colors.espresso, fontSize: 13, fontWeight: "600" },
+  sizeChoiceLabelSelected: { color: colors.espresso, fontWeight: "800" },
   pickControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   fieldLabel: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
   stepper: { flexDirection: "row", alignItems: "center", gap: spacing.sm },

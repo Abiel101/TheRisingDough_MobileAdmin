@@ -1,5 +1,5 @@
 export type ProductDiscountType = "percent" | "amount";
-export type CatalogDiscount = { type: ProductDiscountType; value: number } | null;
+export type CatalogDiscount = { type: ProductDiscountType; value: number; endsOn?: string | null } | null;
 export type CatalogPriceOption = {
   id: string;
   label: string;
@@ -24,6 +24,12 @@ export function dollarsToCents(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
+function localDateKey() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
 export function getCatalogUnitPriceCents(
   basePrice: number,
   discount: CatalogDiscount,
@@ -31,8 +37,8 @@ export function getCatalogUnitPriceCents(
   priceOverrideCents?: number,
 ): number {
   let cents = priceOverrideCents ?? dollarsToCents(basePrice);
-  const hasProductDiscount = Boolean(discount && discount.value > 0);
-  if (discount && discount.value > 0) {
+  const hasProductDiscount = Boolean(discount && discount.value > 0 && (!discount.endsOn || discount.endsOn >= localDateKey()));
+  if (hasProductDiscount && discount) {
     cents = discount.type === "percent"
       ? Math.round(cents * (1 - Math.min(discount.value, 100) / 100))
       : Math.max(0, cents - dollarsToCents(discount.value));

@@ -7,7 +7,7 @@ import { hasOptionLabel } from "@/domain/orders";
 import type { ProductOptionInput } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
-/** Entry form for one catalog option; the price is optional and falls back to the item's price. */
+/** Entry form for one catalog option and its price. */
 export function OptionAddForm({
   existingNames,
   onAdd,
@@ -24,7 +24,7 @@ export function OptionAddForm({
 
   async function submit() {
     const trimmed = name.trim().replace(/\s+/g, " ");
-    const parsedPrice = price.trim() ? Number(price) : null;
+    const parsedPrice = Number(price);
     if (!trimmed) return;
     if (!hasOptionLabel(trimmed)) {
       setError("“Default” is reserved. Choose a different option name.");
@@ -34,8 +34,8 @@ export function OptionAddForm({
       setError(`“${trimmed}” is already listed.`);
       return;
     }
-    if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
-      setError("Enter a price of zero or more, or leave it blank to use the item price.");
+    if (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      setError("Enter an option price of zero or more.");
       return;
     }
     setBusy(true);
@@ -54,9 +54,9 @@ export function OptionAddForm({
   return (
     <View style={styles.form}>
       <NativeFormField label="Option name" onChangeText={setName} placeholder="e.g. Veggie" value={name} />
-      <NativeFormField keyboardType="decimal-pad" label="Option price (optional)" onChangeText={setPrice} placeholder="Same as item price" value={price} />
+      <NativeFormField keyboardType="decimal-pad" label="Option price (USD)" onChangeText={setPrice} placeholder="0.00" value={price} />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <NativeButton disabled={disabled || busy || !name.trim()} label={busy ? "Adding…" : "Add option"} onPress={() => void submit()} variant="outlined" />
+      <NativeButton disabled={disabled || busy || !name.trim() || !price.trim()} label={busy ? "Adding…" : "Add option"} onPress={() => void submit()} variant="outlined" />
     </View>
   );
 }

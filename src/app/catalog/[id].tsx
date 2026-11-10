@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/auth/auth-context";
 import { OptionAddForm } from "@/components/option-add-form";
 import { NativeButton } from "@/components/ui/native-button";
+import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { addProductOption, getProduct, removeProduct, removeProductOption, updateProductPricing, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
@@ -14,6 +15,17 @@ import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
+}
+
+function dateKeyAfter(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+function todayKey() {
+  return dateKeyAfter(0);
 }
 
 type PricingOptionDraft = CatalogPriceOption & { packSizeInput: string; priceInput: string };
@@ -28,6 +40,8 @@ export default function CatalogItemDetailScreen() {
   const [savingPricing, setSavingPricing] = useState(false);
   const [discountType, setDiscountType] = useState<ProductDiscountType>("percent");
   const [discountValue, setDiscountValue] = useState("");
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [discountEndDate, setDiscountEndDate] = useState("");
   const [pricingOptions, setPricingOptions] = useState<PricingOptionDraft[]>([]);
   const [error, setError] = useState("");
 
@@ -43,6 +57,8 @@ export default function CatalogItemDetailScreen() {
       if (result) {
         setDiscountType(result.discount?.type ?? "percent");
         setDiscountValue(result.discount?.value ? String(result.discount.value) : "");
+        setDiscountEnabled(Boolean(result.discount));
+        setDiscountEndDate(result.discount ? result.discount.endsOn ?? dateKeyAfter(7) : "");
         setPricingOptions(result.pricingOptions.map((option) => ({
           ...option,
           packSizeInput: String(option.packSize),
@@ -127,8 +143,12 @@ export default function CatalogItemDetailScreen() {
   async function savePricing() {
     if (!product) return;
     const amount = Number(discountValue);
-    if (discountValue.trim() && (!Number.isFinite(amount) || amount <= 0 || (discountType === "percent" && amount > 100))) {
+    if (discountEnabled && (!discountValue.trim() || !Number.isFinite(amount) || amount <= 0 || (discountType === "percent" && amount > 100))) {
       setError(discountType === "percent" ? "Enter a discount above 0 and at most 100%." : "Enter a discount amount above $0.");
+      return;
+    }
+    if (discountEnabled && (!discountEndDate || discountEndDate < todayKey())) {
+      setError("Choose an end date that is today or later.");
       return;
     }
     const normalizedOptions = pricingOptions.map((option) => ({
@@ -144,12 +164,13 @@ export default function CatalogItemDetailScreen() {
     setSavingPricing(true);
     setError("");
     try {
-      const discount = discountValue.trim() && amount > 0 ? { type: discountType, value: amount } : null;
+      const discount = discountEnabled ? { type: discountType, value: amount, endsOn: discountEndDate } : null;
       await updateProductPricing(product.id, {
         discount,
         pricingOptions: normalizedOptions,
       });
       setProduct({ ...product, discount, pricingOptions: normalizedOptions });
+      setDiscountEnabled(Boolean(discount));
       setPricingOptions(normalizedOptions.map((option) => ({
         ...option,
         packSizeInput: String(option.packSize),
@@ -169,43 +190,53 @@ export default function CatalogItemDetailScreen() {
         <View style={styles.loading}><ActivityIndicator color={colors.teal} /><Text style={styles.muted}>Loading item…</Text></View>
       ) : product ? (
         <>
-          <ContentCard style={styles.card}>
-            <Text style={styles.label}>Current price</Text>
-            <Text style={styles.price}>{formatCurrency(product.price)}</Text>
-            <Text style={styles.description}>This is the price used for new order items, including options without their own price. Existing orders keep their saved price.</Text>
-          </ContentCard>
-          <ContentCard style={styles.card}>
-            <Text style={styles.label}>Options</Text>
+          <ContentCard style={[styles.card, styles.optionsCard]}>
+            <Text style={styles.sectionTitle}>Options and prices</Text>
+            <Text style={styles.description}>Each option has its own single-item price. Keep at least one option for every item.</Text>
             {product.options.length ? product.options.map((option) => (
               <View key={option.id} style={styles.optionRow}>
                 <Text numberOfLines={2} style={styles.optionName}>{option.name}</Text>
                 <Text style={styles.muted}>{formatCurrency(option.price ?? product.price)}</Text>
-                <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" hitSlop={8} onPress={() => confirmRemoveOption(option)}>
+                <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" disabled={product.options.length < 2} hitSlop={8} onPress={() => confirmRemoveOption(option)} style={product.options.length < 2 && styles.disabledAction}>
                   <Text style={styles.removeText}>Remove</Text>
                 </Pressable>
               </View>
-            )) : <Text style={styles.description}>No options. Orders list this item by its name only.</Text>}
+            )) : <Text style={styles.description}>No saved options yet. Add a priced option to keep this item available on new orders.</Text>}
             <OptionAddForm existingNames={product.options.map((option) => option.name)} onAdd={handleAddOption} />
           </ContentCard>
-          <ContentCard style={styles.card}>
-            <Text style={styles.sectionTitle}>Item discount</Text>
-            <Text style={styles.description}>Applies to this item and its pack prices on new orders.</Text>
-            <View style={styles.typeRow}>
-              {(["percent", "amount"] as const).map((type) => {
-                const selected = discountType === type;
-                return (
-                  <Pressable key={type} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setDiscountType(type)} style={[styles.chip, selected && styles.chipSelected]}>
-                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{type === "percent" ? "Percent (%)" : "Amount ($)"}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <NativeFormField keyboardType="decimal-pad" label={discountType === "percent" ? "Item discount percent" : "Item discount amount"} onChangeText={setDiscountValue} placeholder={discountType === "percent" ? "10" : "1.00"} value={discountValue} />
-            {discountValue ? <NativeButton label="Remove item discount" onPress={() => setDiscountValue("")} variant="text" /> : null}
+          <ContentCard style={[styles.card, styles.discountCard]}>
+            <Text style={styles.sectionTitle}>Temporary discount</Text>
+            <Text style={styles.description}>Discounts apply to new orders through the selected end date. Existing orders keep their saved prices.</Text>
+            {!discountEnabled ? (
+              <NativeButton
+                label="Add temporary discount"
+                onPress={() => {
+                  setDiscountEnabled(true);
+                  setDiscountEndDate(dateKeyAfter(7));
+                }}
+                variant="outlined"
+              />
+            ) : (
+              <>
+                <View style={styles.typeRow}>
+                  {(["percent", "amount"] as const).map((type) => {
+                    const selected = discountType === type;
+                    return (
+                      <Pressable key={type} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setDiscountType(type)} style={[styles.chip, selected && styles.chipSelected]}>
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{type === "percent" ? "Percent (%)" : "Amount ($)"}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <NativeFormField keyboardType="decimal-pad" label={discountType === "percent" ? "Discount percent" : "Discount amount (USD)"} onChangeText={setDiscountValue} placeholder={discountType === "percent" ? "10" : "1.00"} value={discountValue} />
+                <NativeDatePickerField label="Discount ends on" value={discountEndDate || dateKeyAfter(7)} onChange={setDiscountEndDate} />
+                <NativeButton label="Remove temporary discount" onPress={() => { setDiscountEnabled(false); setDiscountValue(""); setDiscountEndDate(""); }} variant="text" />
+              </>
+            )}
           </ContentCard>
-          <ContentCard style={styles.card}>
+          <ContentCard style={[styles.card, styles.packCard]}>
             <Text style={styles.sectionTitle}>Pack and size prices</Text>
-            <Text style={styles.description}>Optional fixed price choices such as half dozen or dozen. Orders count each choice as one pack.</Text>
+            <Text style={styles.description}>Set separate prices for half dozen, dozen, or other pack sizes. These are separate from single-item options and discounts.</Text>
             {pricingOptions.map((option) => (
               <View key={option.id} style={styles.optionCard}>
                 <NativeFormField label="Option label" onChangeText={(label) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, label } : entry))} placeholder="Half dozen" value={option.label} />
@@ -217,8 +248,8 @@ export default function CatalogItemDetailScreen() {
               </View>
             ))}
             <NativeButton label="Add pack option" onPress={addPricingOption} variant="outlined" />
-            <NativeButton disabled={savingPricing} label={savingPricing ? "Saving pricing…" : "Save pricing"} onPress={() => void savePricing()} />
           </ContentCard>
+          <NativeButton disabled={savingPricing} label={savingPricing ? "Saving…" : "Save discounts and pack prices"} onPress={() => void savePricing()} />
           <NativeButton disabled={removing} label={removing ? "Removing…" : "Remove from catalog"} onPress={confirmRemove} variant="outlined" />
         </>
       ) : null}
@@ -229,8 +260,9 @@ export default function CatalogItemDetailScreen() {
 const styles = StyleSheet.create({
   loading: { minHeight: 220, alignItems: "center", justifyContent: "center", gap: spacing.md },
   card: { gap: spacing.sm, padding: spacing.md },
-  label: { color: colors.mutedText, fontSize: 12 },
-  price: { color: colors.espresso, fontSize: 28, fontWeight: "700" },
+  optionsCard: { backgroundColor: "#EEF7F5", borderColor: "#C9DFDA" },
+  discountCard: { backgroundColor: "#FFF1EE", borderColor: "#F0C9C1" },
+  packCard: { backgroundColor: "#FFF8E9", borderColor: "#EAD9B5" },
   description: { color: colors.mutedText, fontSize: 13, lineHeight: 19 },
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   typeRow: { flexDirection: "row", gap: spacing.sm },
@@ -245,5 +277,6 @@ const styles = StyleSheet.create({
   optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
   optionName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
   removeText: { color: colors.brick, fontSize: 13, fontWeight: "700" },
+  disabledAction: { opacity: 0.4 },
   muted: { color: colors.mutedText, fontSize: 12 },
 });

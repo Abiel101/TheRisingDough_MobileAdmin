@@ -15,7 +15,7 @@ type OrderView = "Active" | "Pending approval" | "Completed" | "Cancelled";
 const viewLabels: Record<OrderView, string> = {
   Active: "Active",
   "Pending approval": "Approval",
-  Completed: "Completed",
+  Completed: "Done",
   Cancelled: "Cancelled",
 };
 
@@ -85,7 +85,7 @@ export default function OrdersScreen() {
         onChange={setOrderView}
         options={(["Active", "Pending approval", "Completed", "Cancelled"] as const).map((view) => ({
           value: view,
-          label: `${viewLabels[view]} (${orders.filter((order) => belongsInView(order, view)).length})`,
+          label: viewLabels[view],
         }))}
         value={orderView}
       />

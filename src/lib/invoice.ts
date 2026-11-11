@@ -84,8 +84,16 @@ export function buildInvoiceHtml(order: OrderRecord): string {
   return `<!doctype html><html><head><meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
-    body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #302017; padding: 32px; }
-    h1 { font-family: Georgia, serif; margin: 0; font-size: 28px; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #302017; margin: 0; padding: 32px; background: #FBF7EF; position: relative; min-height: 100vh; overflow: hidden; }
+    .waves { position: absolute; left: 0; width: 100%; z-index: 0; }
+    .waves.top { top: 0; height: 170px; }
+    .waves.bottom { bottom: 0; height: 190px; }
+    .content { position: relative; z-index: 1; }
+    .stamp { position: absolute; right: 36px; top: 46%; transform: rotate(-14deg); z-index: 2; border: 4px double #174A46; color: #174A46; border-radius: 12px; padding: 6px 22px; font-family: Georgia, serif; font-size: 44px; font-weight: 700; letter-spacing: 6px; opacity: 0.55; text-align: center; line-height: 1; }
+    .stamp small { display: block; font-size: 10px; letter-spacing: 3px; margin-top: 4px; font-family: -apple-system, Helvetica, Arial, sans-serif; }
+    h1 { font-family: Georgia, serif; margin: 0; font-size: 30px; color: #174A46; }
+    .head .tag { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: #8A6A3F; }
     .head { display: flex; justify-content: space-between; align-items: flex-start; }
     .meta { text-align: right; font-size: 13px; line-height: 1.6; }
     .badge { display: inline-block; margin-top: 6px; padding: 4px 10px; border: 1.5px solid #174A46; color: #174A46; border-radius: 6px; font-weight: 700; font-size: 12px; }
@@ -106,8 +114,18 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     .notes { margin-top: 28px; font-size: 13px; color: #82796C; white-space: pre-wrap; }
     .foot { margin-top: 40px; text-align: center; font-size: 12px; color: #82796C; }
   </style></head><body>
+    <svg class="waves top" viewBox="0 0 800 170" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0 0H800V70C700 120 620 40 520 70C420 100 340 140 240 100C140 60 80 100 0 90Z" fill="#EFE3CC"/>
+      <path d="M0 0H800V40C700 85 620 10 520 40C420 70 340 105 240 70C140 35 80 70 0 60Z" fill="#DCE8E2"/>
+    </svg>
+    <svg class="waves bottom" viewBox="0 0 800 190" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0 80C100 40 180 110 280 80C380 50 460 10 560 50C660 90 720 50 800 70V190H0Z" fill="#EFE3CC"/>
+      <path d="M0 120C100 80 180 150 280 120C380 90 460 60 560 95C660 130 720 100 800 110V190H0Z" fill="#DCE8E2"/>
+    </svg>
+    <div class="stamp">PAID<small>THE RISING DOUGH</small></div>
+    <div class="content">
     <div class="head">
-      <div><h1>The Rising Dough</h1><div>Invoice</div></div>
+      <div><h1>The Rising Dough</h1><div class="tag">Fresh baked · Invoice</div></div>
       <div class="meta">
         <div><strong>${escapeHtml(order.number)}</strong></div>
         <div>Issued: ${longDate(new Date().toISOString().slice(0, 10))}</div>
@@ -133,6 +151,7 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     </div>
     ${order.notes ? `<div class="notes"><strong>Notes</strong><br/>${escapeHtml(order.notes)}</div>` : ""}
     <div class="foot">Thank you for your order!</div>
+    </div>
   </body></html>`;
 }
 

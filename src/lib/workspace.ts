@@ -1021,3 +1021,40 @@ export async function listApprovalActivity(): Promise<ApprovalActivity[]> {
     createdAt: row.created_at,
   }));
 }
+
+/** One ingredient needed to make a single unit of a catalog item. */
+export type RecipeIngredient = { id: string; productId: string; ingredient: string; quantity: number; unit: string };
+export type RecipeIngredientInput = { ingredient: string; quantity: number; unit: string };
+
+export async function listRecipes(productId?: string): Promise<RecipeIngredient[]> {
+  let query = supabase
+    .from("admin_product_recipes")
+    .select("id,product_id,ingredient,quantity,unit")
+    .order("sort_order", { ascending: true })
+    .limit(2000);
+  if (productId) query = query.eq("product_id", productId);
+  const { data, error } = await query;
+  throwIfError(error);
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    productId: row.product_id as string,
+    ingredient: row.ingredient as string,
+    quantity: Number(row.quantity),
+    unit: (row.unit as string) ?? "",
+  }));
+}
+
+/** Replaces a catalog item's recipe with the given ingredients. */
+export async function saveRecipe(ownerId: string, productId: string, ingredients: RecipeIngredientInput[]): Promise<void> {
+  const rows = ingredients.map((entry, index) => {
+    const ingredient = entry.ingredient.trim();
+    if (!ingredient) throw new Error("Every ingredient needs a name.");
+    if (!Number.isFinite(entry.quantity) || entry.quantity <= 0) throw new Error(`Enter an amount above zero for “${ingredient}”.`);
+    return { owner_id: ownerId, product_id: productId, ingredient, quantity: entry.quantity, unit: entry.unit.trim(), sort_order: index };
+  });
+  const { error: deleteError } = await supabase.from("admin_product_recipes").delete().eq("product_id", productId);
+  throwIfError(deleteError);
+  if (!rows.length) return;
+  const { error } = await supabase.from("admin_product_recipes").insert(rows);
+  throwIfError(error);
+}

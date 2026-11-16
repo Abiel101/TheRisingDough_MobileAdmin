@@ -9,7 +9,7 @@ import { NativeButton } from "@/components/ui/native-button";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { addProductOption, getProduct, removeProduct, removeProductOption, updateProductPricing, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
+import { addProductOption, getProduct, listRecipes, saveRecipe, removeProduct, removeProductOption, updateProductPricing, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
 import type { CatalogPriceOption, ProductDiscountType } from "@/domain/catalog-pricing";
 import { colors, spacing } from "@/theme/tokens";
 
@@ -28,6 +28,8 @@ function todayKey() {
   return dateKeyAfter(0);
 }
 
+type RecipeDraft = { key: string; ingredient: string; quantity: string; unit: string };
+
 type PricingOptionDraft = CatalogPriceOption & { packSizeInput: string; priceInput: string };
 
 export default function CatalogItemDetailScreen() {
@@ -44,6 +46,8 @@ export default function CatalogItemDetailScreen() {
   const [discountEndDate, setDiscountEndDate] = useState("");
   const [pricingOptions, setPricingOptions] = useState<PricingOptionDraft[]>([]);
   const [error, setError] = useState("");
+  const [recipe, setRecipe] = useState<RecipeDraft[]>([]);
+  const [savingRecipe, setSavingRecipe] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -64,6 +68,10 @@ export default function CatalogItemDetailScreen() {
           packSizeInput: String(option.packSize),
           priceInput: (option.priceCents / 100).toFixed(2),
         })));
+      }
+      if (result) {
+        const saved = await listRecipes(result.id);
+        setRecipe(saved.map((entry) => ({ key: entry.id, ingredient: entry.ingredient, quantity: String(entry.quantity), unit: entry.unit })));
       }
       setError(result ? "" : "This catalog item could not be found.");
     } catch (cause) {
@@ -138,6 +146,24 @@ export default function CatalogItemDetailScreen() {
       packSizeInput: "6",
       priceInput: "0.00",
     }]);
+  }
+
+  function updateRecipe(key: string, patch: Partial<RecipeDraft>) {
+    setRecipe((current) => current.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)));
+  }
+
+  async function handleSaveRecipe() {
+    if (!product || !session?.user.id) return;
+    setSavingRecipe(true);
+    setError("");
+    try {
+      await saveRecipe(session.user.id, product.id, recipe.map((entry) => ({ ingredient: entry.ingredient, quantity: Number(entry.quantity), unit: entry.unit })));
+      Alert.alert("Recipe saved", "Inventory totals will use this recipe.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the recipe.");
+    } finally {
+      setSavingRecipe(false);
+    }
   }
 
   async function savePricing() {
@@ -248,6 +274,22 @@ export default function CatalogItemDetailScreen() {
               </View>
             ))}
             <NativeButton label="Add pack option" onPress={addPricingOption} variant="outlined" />
+          </ContentCard>
+          <ContentCard style={[styles.card, styles.optionsCard]}>
+            <Text style={styles.sectionTitle}>Recipe</Text>
+            <Text style={styles.description}>Ingredients needed to make one {product.name}. Used to total inventory for orders that have not started.</Text>
+            {recipe.map((entry) => (
+              <View key={entry.key} style={styles.optionCard}>
+                <NativeFormField label="Ingredient" onChangeText={(ingredient) => updateRecipe(entry.key, { ingredient })} placeholder="Bread flour" value={entry.ingredient} />
+                <View style={styles.optionNumbers}>
+                  <View style={styles.optionField}><NativeFormField keyboardType="decimal-pad" label="Amount" onChangeText={(quantity) => updateRecipe(entry.key, { quantity })} placeholder="120" value={entry.quantity} /></View>
+                  <View style={styles.optionField}><NativeFormField label="Unit" onChangeText={(unit) => updateRecipe(entry.key, { unit })} placeholder="g" value={entry.unit} /></View>
+                </View>
+                <Pressable accessibilityRole="button" onPress={() => setRecipe((current) => current.filter((item) => item.key !== entry.key))}><Text style={styles.removeOption}>Remove ingredient</Text></Pressable>
+              </View>
+            ))}
+            <NativeButton label="Add ingredient" onPress={() => setRecipe((current) => [...current, { key: `new-${Date.now()}-${current.length}`, ingredient: "", quantity: "", unit: "" }])} variant="outlined" />
+            <NativeButton disabled={savingRecipe} label={savingRecipe ? "Saving…" : "Save recipe"} onPress={() => void handleSaveRecipe()} />
           </ContentCard>
           <NativeButton disabled={savingPricing} label={savingPricing ? "Saving…" : "Save discounts and pack prices"} onPress={() => void savePricing()} />
           <NativeButton disabled={removing} label={removing ? "Removing…" : "Remove from catalog"} onPress={confirmRemove} variant="outlined" />

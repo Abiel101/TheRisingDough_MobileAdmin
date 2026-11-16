@@ -3,6 +3,8 @@ import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { exportNotStartedOrders } from "@/lib/production-export";
+import { NativeButton } from "@/components/ui/native-button";
 import { OrderCard } from "@/components/order-card";
 import { AddFab, SearchField } from "@/components/ui/design";
 import { NativeSegmentedControl } from "@/components/ui/native-segmented-control";
@@ -36,6 +38,7 @@ export default function OrdersScreen() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +55,18 @@ export default function OrdersScreen() {
   const handleStatusUpdated = useCallback((orderId: string, status: OrderStatus) => {
     setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, status } : order)));
   }, []);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await exportNotStartedOrders();
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not export orders.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function refresh() {
     setLoading(true);
@@ -88,6 +103,12 @@ export default function OrdersScreen() {
           label: viewLabels[view],
         }))}
         value={orderView}
+      />
+      <NativeButton
+        disabled={exporting}
+        label={exporting ? "Preparing export…" : "Export not-started orders + inventory"}
+        onPress={() => void handleExport()}
+        variant="outlined"
       />
       <SearchField
         accessibilityLabel="Search orders or customers"

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Modal, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import { Pressable } from "@/components/ui/pressable";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { loadInbox } from "@/lib/approval-inbox";
 import { MANAGER_PASSWORD } from "@/lib/manager";
 import { deleteHolidayRequest, type HolidayRequestActivity } from "@/lib/workspace";
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { colors, spacing } from "@/theme/tokens";
 
 type RequestView = "New" | "Processed";
@@ -141,7 +142,9 @@ export default function RequestsScreen() {
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+      <KeyboardAvoider>
       <FlatList
+        {...keyboardScrollProps}
         contentContainerStyle={styles.content}
         data={error ? [] : visibleRequests}
         keyExtractor={(request) => request.id}
@@ -151,8 +154,9 @@ export default function RequestsScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      </KeyboardAvoider>
       <Modal animationType="fade" onRequestClose={closeDelete} transparent visible={Boolean(pendingDelete)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalRoot}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalRoot}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Delete this request?</Text>
             <Text style={styles.modalBody}>

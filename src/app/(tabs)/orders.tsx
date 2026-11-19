@@ -11,6 +11,7 @@ import { NativeSegmentedControl } from "@/components/ui/native-segmented-control
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listOrders, type OrderRecord } from "@/lib/workspace";
 import type { OrderStatus } from "@/domain/orders";
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { colors, spacing } from "@/theme/tokens";
 
 type OrderView = "Active" | "Pending approval" | "Completed" | "Cancelled";
@@ -128,7 +129,9 @@ export default function OrdersScreen() {
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+      <KeyboardAvoider>
       <FlatList
+        {...keyboardScrollProps}
         contentContainerStyle={styles.content}
         data={error ? [] : visibleOrders}
         keyExtractor={(order) => order.id}
@@ -140,6 +143,7 @@ export default function OrdersScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      </KeyboardAvoider>
       <AddFab label="Add order" onPress={() => router.push("/order/new")} />
     </SafeAreaView>
   );

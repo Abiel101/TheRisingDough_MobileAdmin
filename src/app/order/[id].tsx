@@ -1,3 +1,4 @@
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
@@ -414,7 +415,8 @@ export default function OrderDetailScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoider>
+      <ScrollView contentContainerStyle={styles.content} {...keyboardScrollProps}>
         <Text style={styles.title}>{firstName}’s order</Text>
         <View style={styles.pillRow}>
           <View style={[styles.pill, { backgroundColor: `${statusColor}22` }]}>
@@ -699,6 +701,7 @@ export default function OrderDetailScreen() {
           </Pressable>
         )}
       </ScrollView>
+      </KeyboardAvoider>
 
       {showPayAction || advanceTarget || cancelled ? (
         <View style={styles.footer}>
@@ -736,7 +739,7 @@ export default function OrderDetailScreen() {
       ) : null}
 
       <Modal animationType="fade" onRequestClose={closeMenu} transparent visible={menuMode !== "closed"}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboardAvoider}>
+        <KeyboardAvoidingView behavior="padding" style={styles.keyboardAvoider}>
         <Pressable feedback={false} onPress={closeMenu} style={styles.backdrop}>
           <Pressable feedback={false} onPress={() => undefined} style={styles.menuSheet}>
             {menuMode === "menu" ? (

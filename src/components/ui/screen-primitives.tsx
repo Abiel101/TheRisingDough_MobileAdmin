@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { router } from "expo-router";
 import { SafeAreaView, type SafeAreaViewProps } from "react-native-safe-area-context";
 
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { NativeIcon } from "@/components/ui/native-icon";
 import { Pressable } from "@/components/ui/pressable";
 import { NotificationBell } from "@/components/notification-bell";
@@ -27,14 +28,16 @@ export function AppScreen({
 }: ScrollViewProps & { header?: ReactNode; safeAreaEdges?: SafeAreaViewProps["edges"] }) {
   return (
     <SafeAreaView edges={safeAreaEdges} style={styles.safeArea}>
-      {header ? <View style={styles.fixedHeader}>{header}</View> : null}
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        {...scrollProps}
-      >
-        {children}
-      </ScrollView>
+      <KeyboardAvoider>
+        {header ? <View style={styles.fixedHeader}>{header}</View> : null}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          {...keyboardScrollProps}
+          {...scrollProps}
+        >
+          {children}
+        </ScrollView>
+      </KeyboardAvoider>
     </SafeAreaView>
   );
 }

@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { listCustomers, type CustomerRecord } from "@/lib/workspace";
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { colors, spacing } from "@/theme/tokens";
 
 export default function CustomersScreen() {
@@ -61,7 +62,9 @@ export default function CustomersScreen() {
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+      <KeyboardAvoider>
       <FlatList
+        {...keyboardScrollProps}
         contentContainerStyle={styles.content}
         data={error && customers.length === 0 ? [] : visibleCustomers}
         keyExtractor={(customer) => customer.id}
@@ -86,6 +89,7 @@ export default function CustomersScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      </KeyboardAvoider>
       <AddFab label="Add customer" onPress={() => { setError(""); router.push("/customer/new"); }} />
     </SafeAreaView>
   );

@@ -1,18 +1,10 @@
-import { Platform } from "react-native";
-import * as Print from "expo-print";
+import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { Platform } from "react-native";
 
-import { groupLinesByItem, hasOptionLabel } from "@/domain/orders";
+import { hasOptionLabel } from "@/domain/orders";
+import { toPieceLine } from "@/domain/pack-quantities";
 import { listOrders, listRecipes, type OrderRecord, type RecipeIngredient } from "@/lib/workspace";
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 const formatAmount = (value: number) => String(Math.round(value * 1000) / 1000);
 
@@ -31,6 +23,7 @@ export function totalIngredients(orders: readonly OrderRecord[], recipes: readon
   const missing = new Set<string>();
   for (const order of orders) {
     for (const line of order.items) {
+      const pieces = toPieceLine({ name: line.name, quantity: line.quantity, price: line.price }).pieces;
       const recipe = byProduct.get(line.productId);
       if (!recipe) {
         missing.add(line.name);
@@ -39,7 +32,7 @@ export function totalIngredients(orders: readonly OrderRecord[], recipes: readon
       for (const entry of recipe) {
         const key = `${entry.ingredient.toLocaleLowerCase()}|${entry.unit.toLocaleLowerCase()}`;
         const current = totals.get(key) ?? { ingredient: entry.ingredient, unit: entry.unit, quantity: 0 };
-        current.quantity += entry.quantity * line.quantity;
+        current.quantity += entry.quantity * pieces;
         totals.set(key, current);
       }
     }
@@ -48,65 +41,79 @@ export function totalIngredients(orders: readonly OrderRecord[], recipes: readon
   return { totals: list, missing: [...missing].sort() };
 }
 
-function buildHtml(orders: OrderRecord[], recipes: RecipeIngredient[]) {
-  const sorted = [...orders].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.number.localeCompare(b.number));
-  const allLines = sorted.flatMap((order) => order.items);
-  const { totals, missing } = totalIngredients(sorted, recipes);
+type Cell = string | number;
 
-  const productTotals = groupLinesByItem(allLines).map((group) => {
-    const options = group.showOptions
-      ? group.entries
-          .map(({ line }) => `<div class="option">${escapeHtml(hasOptionLabel(line.optionName) ? line.optionName : "Default")} × ${line.quantity}</div>`)
-          .join("")
-      : "";
-    return `<tr><td><strong>${escapeHtml(group.name)}</strong>${options}</td><td class="num">${group.quantity}</td></tr>`;
-  });
-
-  const orderRows = sorted.map((order) => {
-    const lines = order.items
-      .map((item) => `${item.quantity} × ${escapeHtml(item.name)}${hasOptionLabel(item.optionName) ? ` (${escapeHtml(item.optionName)})` : ""}`)
-      .join("<br/>");
-    return `<tr><td>${escapeHtml(order.number)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.dueDate)}</td><td>${lines}${order.notes ? `<div class="note">${escapeHtml(order.notes)}</div>` : ""}</td></tr>`;
-  });
-
-  const ingredientRows = totals.map(
-    (entry) => `<tr><td>${escapeHtml(entry.ingredient)}</td><td class="num">${formatAmount(entry.quantity)} ${escapeHtml(entry.unit)}</td></tr>`,
-  );
-
-  return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <style>
-    body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #302017; padding: 28px; }
-    h1 { margin: 0; color: #174A46; } h2 { margin: 28px 0 8px; color: #174A46; font-size: 18px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; border-bottom: 2px solid #302017; padding: 6px 4px; }
-    td { padding: 6px 4px; border-bottom: 1px solid #E9E4DA; vertical-align: top; }
-    .num { text-align: right; white-space: nowrap; } .option { padding-left: 14px; color: #4A3A2E; }
-    .note { color: #82796C; font-size: 12px; margin-top: 4px; } .warn { color: #B3261E; font-size: 13px; margin-top: 8px; }
-  </style></head><body>
-    <h1>Production list</h1>
-    <div>${sorted.length} order${sorted.length === 1 ? "" : "s"} not started · ${escapeHtml(new Date().toLocaleDateString("en-US", { dateStyle: "long" }))}</div>
-    <h2>Items to make</h2>
-    <table><tr><th>Item</th><th class="num">Qty</th></tr>${productTotals.join("")}</table>
-    <h2>Inventory needed</h2>
-    ${ingredientRows.length ? `<table><tr><th>Ingredient</th><th class="num">Total</th></tr>${ingredientRows.join("")}</table>` : "<div>No recipes have been added yet.</div>"}
-    ${missing.length ? `<div class="warn">No recipe yet for: ${missing.map(escapeHtml).join(", ")}</div>` : ""}
-    <h2>Orders</h2>
-    <table><tr><th>Order</th><th>Customer</th><th>Due</th><th>Items</th></tr>${orderRows.join("")}</table>
-  </body></html>`;
+function csvCell(value: Cell) {
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-/** Exports every order that has not been started, with item and ingredient totals, as a PDF. */
+const toCsv = (rows: Cell[][]) => `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+
+/** Builds the spreadsheet rows: total pieces per item first, then every order line. */
+export function buildExportRows(orders: OrderRecord[], recipes: RecipeIngredient[]): Cell[][] {
+  const sorted = [...orders].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.number.localeCompare(b.number));
+  const totals = new Map<string, { item: string; option: string; pieces: number }>();
+  for (const order of sorted) {
+    for (const line of order.items) {
+      const piece = toPieceLine({ name: line.name, quantity: line.quantity, price: line.price });
+      const option = hasOptionLabel(line.optionName) ? line.optionName : "";
+      const key = `${piece.baseName.toLocaleLowerCase()}|${option.toLocaleLowerCase()}`;
+      const entry = totals.get(key) ?? { item: piece.baseName, option, pieces: 0 };
+      entry.pieces += piece.pieces;
+      totals.set(key, entry);
+    }
+  }
+
+  const rows: Cell[][] = [["TOTAL TO MAKE"], ["Item", "Option", "Total pieces"]];
+  [...totals.values()]
+    .sort((a, b) => a.item.localeCompare(b.item) || a.option.localeCompare(b.option))
+    .forEach((entry) => rows.push([entry.item, entry.option, entry.pieces]));
+
+  const { totals: ingredients, missing } = totalIngredients(sorted, recipes);
+  if (ingredients.length) {
+    rows.push([], ["INGREDIENTS NEEDED"], ["Ingredient", "Unit", "Quantity"]);
+    ingredients.forEach((entry) => rows.push([entry.ingredient, entry.unit, Number(formatAmount(entry.quantity))]));
+  }
+  if (missing.length) rows.push([], ["No recipe yet for", missing.join("; ")]);
+
+  rows.push([], ["ORDERS"], ["Order", "Customer", "Due", "Item", "Option", "Pack", "Packs ordered", "Pieces per pack", "Total pieces", "Price per pack", "Line total", "Notes"]);
+  for (const order of sorted) {
+    order.items.forEach((line, index) => {
+      const piece = toPieceLine({ name: line.name, quantity: line.quantity, price: line.price });
+      rows.push([
+        order.number, order.customer, order.dueDate, piece.baseName,
+        hasOptionLabel(line.optionName) ? line.optionName : "",
+        piece.packLabel, piece.packs, piece.piecesPerPack, piece.pieces, piece.packPrice.toFixed(2), piece.lineTotal.toFixed(2),
+        index === 0 ? order.notes : "",
+      ]);
+    });
+  }
+  return rows;
+}
+
+/** Exports every order that has not been started as a spreadsheet-ready CSV with piece counts. */
 export async function exportNotStartedOrders(): Promise<number> {
   const [orders, recipes] = await Promise.all([listOrders({ limit: 500 }), listRecipes()]);
   const pending = orders.filter(isNotStarted);
   if (!pending.length) throw new Error("There are no orders waiting to be started.");
-  const html = buildHtml(pending, recipes);
+  const csv = toCsv(buildExportRows(pending, recipes));
+  const fileName = `production-list-${new Date().toISOString().slice(0, 10)}.csv`;
+
   if (Platform.OS === "web") {
-    await Print.printAsync({ html });
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
     return pending.length;
   }
-  const { uri } = await Print.printToFileAsync({ html });
+
+  const file = new File(Paths.cache, fileName);
+  file.create({ overwrite: true });
+  file.write(csv);
   if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available on this device.");
-  await Sharing.shareAsync(uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf", dialogTitle: "Production list" });
+  await Sharing.shareAsync(file.uri, { mimeType: "text/csv", UTI: "public.comma-separated-values-text", dialogTitle: "Production list" });
   return pending.length;
 }

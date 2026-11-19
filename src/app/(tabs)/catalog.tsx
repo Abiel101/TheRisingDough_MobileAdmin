@@ -8,6 +8,7 @@ import { Avatar, AddFab, SearchField } from "@/components/ui/design";
 import { MessageCard, ScreenHeader } from "@/components/ui/screen-primitives";
 import { getCatalogPromotion, listProducts, productPriceRange, type ProductRecord } from "@/lib/workspace";
 import { DEFAULT_CATALOG_PROMOTION, getCatalogUnitPriceCents, type CatalogPromotion } from "@/domain/catalog-pricing";
+import { KeyboardAvoider, keyboardScrollProps } from "@/components/ui/keyboard-avoider";
 import { colors, spacing } from "@/theme/tokens";
 
 function formatCurrency(value: number) {
@@ -82,7 +83,9 @@ export default function CatalogScreen() {
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+      <KeyboardAvoider>
       <FlatList
+        {...keyboardScrollProps}
         contentContainerStyle={styles.content}
         data={error && products.length === 0 ? [] : visibleProducts}
         keyExtractor={(product) => product.id}
@@ -121,6 +124,7 @@ export default function CatalogScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.list}
       />
+      </KeyboardAvoider>
       <AddFab label="Add item" onPress={() => router.push("/catalog/new")} />
     </SafeAreaView>
   );

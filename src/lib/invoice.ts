@@ -3,7 +3,48 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
 import { allocateLineTotals, calculateOrderTotals, groupLinesByItem, hasOptionLabel, type PaymentMethod } from "@/domain/orders";
-import type { OrderRecord } from "@/lib/workspace";
+import type { ApprovalOrder, OrderRecord } from "@/lib/workspace";
+
+export type InvoiceSource = Pick<
+  OrderRecord,
+  | "number"
+  | "customer"
+  | "customerPhone"
+  | "customerEmail"
+  | "customerAddress"
+  | "dueDate"
+  | "fulfilledDate"
+  | "paid"
+  | "paymentMethod"
+  | "paymentMethodOther"
+  | "discount"
+  | "notes"
+> & { items: { productId: string; name: string; optionName: string; price: number; quantity: number }[] };
+
+/** Adapts the customer-link payload so the same invoice can be printed from the public page. */
+export function invoiceFromApprovalOrder(order: ApprovalOrder): InvoiceSource {
+  return {
+    number: order.orderNumber,
+    customer: order.customerName || "Customer",
+    customerPhone: "",
+    customerEmail: "",
+    customerAddress: "",
+    dueDate: order.dueDate,
+    fulfilledDate: order.fulfilledDate,
+    paid: order.paid,
+    paymentMethod: order.paymentMethod,
+    paymentMethodOther: order.paymentMethodOther,
+    discount: order.discount,
+    notes: "",
+    items: order.items.map((item) => ({
+      productId: item.name,
+      name: item.name,
+      optionName: item.optionName,
+      price: item.unitPrice,
+      quantity: item.quantity,
+    })),
+  };
+}
 
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
@@ -28,7 +69,7 @@ function longDate(dateKey: string) {
 
 const methodLabels: Record<PaymentMethod, string> = { cash: "Cash", zelle: "Zelle", other: "Other" };
 
-function paymentMethodText(order: OrderRecord) {
+function paymentMethodText(order: InvoiceSource) {
   if (!order.paymentMethod) return "Not recorded";
   return order.paymentMethod === "other" ? order.paymentMethodOther || "Other" : methodLabels[order.paymentMethod];
 }
@@ -38,7 +79,7 @@ export function canInvoice(order: OrderRecord): boolean {
   return order.status === "Fulfilled" && order.paid;
 }
 
-export function buildInvoiceHtml(order: OrderRecord): string {
+export function buildInvoiceHtml(order: InvoiceSource): string {
   const lineItems = order.items.map((item) => ({
     productId: item.productId,
     productName: item.name,
@@ -75,7 +116,7 @@ export function buildInvoiceHtml(order: OrderRecord): string {
         : group.entries.map(({ index }) => lineRow(index, order.items[index].name, false)).join(""),
     )
     .join("");
-  const status = "PAID";
+  const status = order.paid ? "PAID" : "BALANCE DUE";
   const contact = [order.customerPhone, order.customerEmail, order.customerAddress]
     .filter(Boolean)
     .map(escapeHtml)
@@ -122,7 +163,7 @@ export function buildInvoiceHtml(order: OrderRecord): string {
       <path d="M0 80C100 40 180 110 280 80C380 50 460 10 560 50C660 90 720 50 800 70V190H0Z" fill="#EFE3CC"/>
       <path d="M0 120C100 80 180 150 280 120C380 90 460 60 560 95C660 130 720 100 800 110V190H0Z" fill="#DCE8E2"/>
     </svg>
-    <div class="stamp">PAID<small>THE RISING DOUGH</small></div>
+    ${order.paid ? '<div class="stamp">PAID<small>THE RISING DOUGH</small></div>' : ""}
     <div class="content">
     <div class="head">
       <div><h1>The Rising Dough</h1><div class="tag">Fresh baked · Invoice</div></div>
@@ -145,8 +186,8 @@ export function buildInvoiceHtml(order: OrderRecord): string {
     </div>
     <div class="pay">
       <div><strong>Payment</strong><span></span></div>
-      <div><span>Amount paid</span><span>${money(total)}</span></div>
-      <div><span>Payment method</span><span>${escapeHtml(paymentMethodText(order))}</span></div>
+      <div><span>${order.paid ? "Amount paid" : "Amount due"}</span><span>${money(total)}</span></div>
+      ${order.paid ? `<div><span>Payment method</span><span>${escapeHtml(paymentMethodText(order))}</span></div>` : ""}
       ${order.fulfilledDate ? `<div><span>Completed</span><span>${longDate(order.fulfilledDate)}</span></div>` : ""}
     </div>
     ${order.notes ? `<div class="notes"><strong>Notes</strong><br/>${escapeHtml(order.notes)}</div>` : ""}
@@ -174,5 +215,24 @@ export async function shareInvoicePdf(order: OrderRecord): Promise<void> {
     mimeType: "application/pdf",
     UTI: "com.adobe.pdf",
     dialogTitle: `Invoice ${order.number}`,
+  });
+}
+
+/** Customer-facing invoice: opens the print dialog on the web and a shareable PDF on devices. */
+export async function printOrSaveInvoice(source: InvoiceSource): Promise<void> {
+  const html = buildInvoiceHtml(source);
+  if (Platform.OS === "web") {
+    await Print.printAsync({ html });
+    return;
+  }
+  const { uri } = await Print.printToFileAsync({ html });
+  if (!(await Sharing.isAvailableAsync())) {
+    await Print.printAsync({ uri });
+    return;
+  }
+  await Sharing.shareAsync(uri, {
+    mimeType: "application/pdf",
+    UTI: "com.adobe.pdf",
+    dialogTitle: `Invoice ${source.number}`,
   });
 }

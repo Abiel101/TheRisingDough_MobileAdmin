@@ -53,6 +53,8 @@ export function productPriceRange(product: ProductRecord): { min: number; max: n
 export function optionUnitPrice(product: ProductRecord, option?: ProductOption | null): number {
   return option?.price ?? product.price;
 }
+export type DeliveryMethod = "delivery" | "pickup";
+
 export type OrderRecord = {
   id: string;
   number: string;
@@ -78,6 +80,9 @@ export type OrderRecord = {
   declinedAt: string;
   deliveryTime: string;
   customerNotifiedAt: string;
+  deliveredAt: string;
+  deliveryMethod: DeliveryMethod | null;
+  deliveryPhotoPath: string;
   notes: string;
   items: OrderLine[];
   createdAt: string;
@@ -128,6 +133,9 @@ type OrderRow = {
   declined_at?: string | null;
   delivery_time?: string | null;
   customer_notified_at?: string | null;
+  delivered_at?: string | null;
+  delivery_method?: DeliveryMethod | null;
+  delivery_photo_path?: string | null;
   notes: string;
   created_at: string;
 };
@@ -541,6 +549,7 @@ const baseOrderColumns =
 const paymentOrderColumns = `${baseOrderColumns},paid,payment_method,payment_method_other`;
 const fullOrderColumns = `${paymentOrderColumns},discount_type,discount_value,approval_token,approval_status,approved_at,approved_by_name,approved_total,declined_at`;
 const notifiedOrderColumns = `${fullOrderColumns},delivery_time,customer_notified_at`;
+const deliveredOrderColumns = `${notifiedOrderColumns},delivered_at,delivery_method,delivery_photo_path`;
 
 type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boolean };
 
@@ -548,7 +557,11 @@ type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boo
 async function selectOrderRows<T extends { error: { code?: string; message: string } | null; data: unknown }>(
   query: (columns: string) => PromiseLike<T>,
 ): Promise<{ result: T; features: OrderFeatures }> {
-  let result = await query(notifiedOrderColumns);
+  let result = await query(deliveredOrderColumns);
+  if (!isMissingPaymentColumn(result.error)) {
+    return { result, features: { paymentTrackingAvailable: true, approvalAvailable: true } };
+  }
+  result = await query(notifiedOrderColumns);
   if (!isMissingPaymentColumn(result.error)) {
     return { result, features: { paymentTrackingAvailable: true, approvalAvailable: true } };
   }
@@ -675,6 +688,9 @@ async function mapOrderRows(
       declinedAt: row.declined_at ?? "",
       deliveryTime: row.delivery_time ?? "",
       customerNotifiedAt: row.customer_notified_at ?? "",
+      deliveredAt: row.delivered_at ?? "",
+      deliveryMethod: row.delivery_method ?? null,
+      deliveryPhotoPath: row.delivery_photo_path ?? "",
       notes: row.notes,
       items: itemsByOrder.get(row.id) ?? [],
       createdAt: row.created_at,
@@ -708,6 +724,61 @@ export async function markOrderNotified(id: string, deliveryTime: string): Promi
   throwIfError(error);
   if (!data) throw new Error("Order was not found for this account.");
   return notifiedAt;
+}
+
+/** Saves the delivery time so the customer link shows it as soon as the reminder is shared. */
+export async function setOrderDeliveryTime(id: string, deliveryTime: string): Promise<void> {
+  const { error } = await supabase.from("admin_orders").update({ delivery_time: deliveryTime.trim() }).eq("id", id);
+  if (isMissingPaymentColumn(error)) throw new Error("Apply the latest Supabase migration to save delivery times.");
+  throwIfError(error);
+}
+
+const DELIVERY_PHOTO_BUCKET = "delivery-photos";
+
+export function deliveryPhotoUrl(path: string): string {
+  return path ? supabase.storage.from(DELIVERY_PHOTO_BUCKET).getPublicUrl(path).data.publicUrl : "";
+}
+
+/** Uploads a delivery photo from a local image URI and returns its storage path. */
+export async function uploadDeliveryPhoto(orderId: string, uri: string, mimeType?: string | null): Promise<string> {
+  const { data: auth, error: authError } = await supabase.auth.getUser();
+  throwIfError(authError);
+  if (!auth.user) throw new Error("Sign in again to upload a photo.");
+  const type = mimeType?.startsWith("image/") ? mimeType : "image/jpeg";
+  const extension = type.split("/")[1]?.replace("jpeg", "jpg").replace(/[^a-z0-9]/gi, "") || "jpg";
+  const path = `${auth.user.id}/${orderId}-${Date.now()}.${extension}`;
+  const body = await (await fetch(uri)).arrayBuffer();
+  const { error } = await supabase.storage.from(DELIVERY_PHOTO_BUCKET).upload(path, body, { contentType: type });
+  if (error) throw new Error("Could not upload the photo. Apply the latest Supabase migration and try again.");
+  return path;
+}
+
+/** Records that the order was delivered or picked up, with an optional photo. */
+export async function confirmOrderDelivered(
+  id: string,
+  method: DeliveryMethod,
+  photoPath: string | null,
+): Promise<string> {
+  const deliveredAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("admin_orders")
+    .update({ delivered_at: deliveredAt, delivery_method: method, delivery_photo_path: photoPath })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (isMissingPaymentColumn(error)) throw new Error("Apply the latest Supabase migration to confirm deliveries.");
+  throwIfError(error);
+  if (!data) throw new Error("Order was not found for this account.");
+  return deliveredAt;
+}
+
+/** Clears a delivery confirmation (for example if it was recorded by mistake). */
+export async function clearOrderDelivered(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("admin_orders")
+    .update({ delivered_at: null, delivery_method: null, delivery_photo_path: null })
+    .eq("id", id);
+  throwIfError(error);
 }
 
 export async function updateOrder(
@@ -918,11 +989,20 @@ export type ApprovalOrder = {
   orderNumber: string;
   customerName: string;
   dueDate: string;
+  deliveryTime: string;
   status: OrderStatus;
   approvalStatus: ApprovalStatus;
   approvedAt: string;
   approvedTotal: number | null;
   declinedAt: string;
+  discount: Discount;
+  paid: boolean;
+  paymentMethod: PaymentMethod | null;
+  paymentMethodOther: string;
+  fulfilledDate: string;
+  deliveredAt: string;
+  deliveryMethod: DeliveryMethod | null;
+  deliveryPhotoPath: string;
   subtotal: number;
   discountAmount: number;
   total: number;
@@ -933,11 +1013,21 @@ type ApprovalPayload = {
   order_number: string;
   customer_name: string | null;
   due_date: string;
+  delivery_time?: string | null;
   status: OrderStatus;
   approval_status: ApprovalStatus;
   approved_at: string | null;
   approved_total: number | string | null;
   declined_at: string | null;
+  discount_type?: DiscountType | null;
+  discount_value?: number | string | null;
+  paid?: boolean;
+  payment_method?: PaymentMethod | null;
+  payment_method_other?: string | null;
+  fulfilled_date?: string | null;
+  delivered_at?: string | null;
+  delivery_method?: DeliveryMethod | null;
+  delivery_photo_path?: string | null;
   subtotal: number | string;
   discount_amount: number | string;
   total: number | string;
@@ -951,11 +1041,23 @@ function mapApprovalPayload(data: unknown): ApprovalOrder | null {
     orderNumber: row.order_number,
     customerName: row.customer_name ?? "",
     dueDate: row.due_date,
+    deliveryTime: row.delivery_time?.trim() ?? "",
     status: row.status,
     approvalStatus: row.approval_status,
     approvedAt: row.approved_at ?? "",
     approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
     declinedAt: row.declined_at ?? "",
+    discount:
+      row.discount_type && Number(row.discount_value) > 0
+        ? { type: row.discount_type, value: Number(row.discount_value) }
+        : null,
+    paid: row.paid ?? false,
+    paymentMethod: row.payment_method ?? null,
+    paymentMethodOther: row.payment_method_other ?? "",
+    fulfilledDate: row.fulfilled_date ?? "",
+    deliveredAt: row.delivered_at ?? "",
+    deliveryMethod: row.delivery_method ?? null,
+    deliveryPhotoPath: row.delivery_photo_path ?? "",
     subtotal: Number(row.subtotal),
     discountAmount: Number(row.discount_amount),
     total: Number(row.total),

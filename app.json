@@ -41,6 +41,13 @@
       "expo-sharing",
       "expo-notifications",
       "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo to confirm a delivery or pick-up for your customer.",
+          "cameraPermission": "Take a photo to confirm a delivery or pick-up for your customer."
+        }
+      ],
       "expo-status-bar",
       "expo-web-browser"
     ],

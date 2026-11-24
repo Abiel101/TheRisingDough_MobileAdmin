@@ -136,8 +136,9 @@ export default function ApproveOrderScreen() {
               <Text style={styles.orderNumber}>{order.orderNumber}</Text>
             </View>
             <View style={styles.dueBlock}>
-              <Text style={styles.invoiceLabel}>NEEDED BY</Text>
+              <Text style={styles.invoiceLabel}>{order.deliveryTime ? "DELIVERY" : "NEEDED BY"}</Text>
               <Text style={styles.dueDate}>{longDate(order.dueDate)}</Text>
+              {order.deliveryTime ? <Text style={styles.dueDate}>Around {order.deliveryTime}</Text> : null}
             </View>
           </View>
 

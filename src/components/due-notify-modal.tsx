@@ -3,7 +3,8 @@ import { useState } from "react";
 import { Modal, Platform, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { Pressable } from "@/components/ui/pressable";
-import { markOrderNotified, type OrderRecord } from "@/lib/workspace";
+import { approvalLinkFor } from "@/lib/customer-links";
+import { markOrderNotified, setOrderDeliveryTime, type OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 // 7:00 AM to 10:00 PM in 30 minute steps.
@@ -20,14 +21,6 @@ function nearestTimeOption() {
   const rounded = Math.round((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
   const index = Math.min(Math.max((rounded - 7 * 60) / 30, 0), TIME_OPTIONS.length - 1);
   return TIME_OPTIONS[index];
-}
-
-const approvalBaseUrl = (process.env.EXPO_PUBLIC_APPROVAL_BASE_URL ?? "").trim().replace(/\/+$/, "");
-
-function approvalLink(order: OrderRecord) {
-  const webOrigin = Platform.OS === "web" && typeof window !== "undefined" ? window.location.origin : "";
-  const base = approvalBaseUrl || webOrigin;
-  return base && order.approvalToken ? `${base}/approve/${order.approvalToken}` : "";
 }
 
 export function dueLabel(dueDate: string) {
@@ -47,17 +40,32 @@ export function DueNotifyModal({
   onNotified: (id: string) => void;
 }) {
   const [time, setTime] = useState(order.deliveryTime || nearestTimeOption());
+  const [savedTime, setSavedTime] = useState(order.deliveryTime.trim());
   const [sent, setSent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const link = approvalLink(order);
+  const link = approvalLinkFor(order.approvalToken);
   const firstName = order.customer.split(" ")[0] || "there";
   const when = dueLabel(order.dueDate) === "Due today" ? "today" : `on ${new Date(`${order.dueDate}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`;
   const text = `Hi ${firstName}, your order ${order.number} will be delivered ${when}${time.trim() ? ` around ${time.trim()}` : ""}.${link ? ` View your order: ${link}` : ""}`;
 
+  // The customer link reads the delivery time from the order, so save it before sending.
+  async function saveTime() {
+    if (time.trim() === savedTime) return true;
+    try {
+      await setOrderDeliveryTime(order.id, time);
+      setSavedTime(time.trim());
+      return true;
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Could not save the delivery time.");
+      return false;
+    }
+  }
+
   async function share() {
     setMessage("");
+    if (!(await saveTime())) return;
     try {
       if (Platform.OS === "web") {
         if (navigator.share) await navigator.share({ text });
@@ -73,6 +81,7 @@ export function DueNotifyModal({
   }
 
   async function copy() {
+    if (!(await saveTime())) return;
     try {
       await Clipboard.setStringAsync(text);
       setSent(true);

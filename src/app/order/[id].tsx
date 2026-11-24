@@ -34,6 +34,8 @@ import { ItemPicker, selectedItemsFromQuantities } from "@/components/item-picke
 import { formatDate } from "@/components/order-card";
 import { OrderLines } from "@/components/order-lines";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
+import { DeliveryConfirmCard } from "@/components/delivery-confirm-card";
+import { approvalLinkFor } from "@/lib/customer-links";
 import { canInvoice, shareInvoicePdf } from "@/lib/invoice";
 import { NativeIcon } from "@/components/ui/native-icon";
 import { FormField, MessageCard } from "@/components/ui/screen-primitives";
@@ -61,8 +63,6 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   zelle: "Zelle",
   other: "Other",
 };
-
-const approvalBaseUrl = (process.env.EXPO_PUBLIC_APPROVAL_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
 const statusColors = {
   Pending: colors.mustard,
@@ -236,9 +236,7 @@ export default function OrderDetailScreen() {
   }
 
   function approvalUrl() {
-    const webOrigin = Platform.OS === "web" && typeof window !== "undefined" ? window.location.origin : "";
-    const base = approvalBaseUrl || webOrigin;
-    return base && order ? `${base}/approve/${order.approvalToken}` : "";
+    return order ? approvalLinkFor(order.approvalToken) : "";
   }
 
   // Marks the order as awaiting approval and reveals the link so it can be copied or shared.
@@ -579,6 +577,17 @@ export default function OrderDetailScreen() {
             <Text style={styles.hint}>Approval isn’t available for this order.</Text>
           )}
         </View>
+
+        {!cancelled ? (
+          <DeliveryConfirmCard
+            key={`${order.deliveredAt}-${order.deliveryPhotoPath}`}
+            onChanged={async () => {
+              const updated = id ? await getOrder(id) : null;
+              if (updated) setOrder(updated);
+            }}
+            order={order}
+          />
+        ) : null}
 
         {canInvoice(order) ? (
           <View style={styles.card}>

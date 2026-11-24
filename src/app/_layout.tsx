@@ -132,6 +132,7 @@ function RootNavigator() {
             <Stack.Screen name="index" />
           </Stack.Protected>
           <Stack.Screen name="approve/[token]" />
+          <Stack.Screen name="delivered/[token]" />
         </Stack>
       </View>
       <Animated.View pointerEvents="none" style={[styles.splash, { opacity: splashOpacity }]}>

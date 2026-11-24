@@ -3,9 +3,11 @@ import * as SecureStore from "expo-secure-store";
 
 import {
   listApprovalActivity,
+  listDueSoonOrders,
   listHolidayRequestActivity,
   type ApprovalActivity,
   type HolidayRequestActivity,
+  type OrderRecord,
 } from "@/lib/workspace";
 
 // Items older than these first-run baselines never count as notifications.
@@ -76,16 +78,20 @@ export type InboxSnapshot = {
   unreadRequestIds: Set<string>;
   /** Ids of approved or declined orders whose result has not been opened yet. */
   unreadApprovalIds: Set<string>;
+  /** Orders due today whose customer has not been told yet. */
+  dueSoon: OrderRecord[];
 };
 
 export async function loadInbox(): Promise<InboxSnapshot> {
-  const [approvalsSeenAt, requestsSeenAt, read, approvals, requests] = await Promise.all([
+  const [approvalsSeenAt, requestsSeenAt, read, approvals, requests, dueOrders] = await Promise.all([
     getBaseline(SEEN_KEY),
     getBaseline(HOLIDAY_REQUESTS_SEEN_KEY),
     loadReadKeys(),
     listApprovalActivity(),
     listHolidayRequestActivity(),
+    listDueSoonOrders().catch(() => [] as OrderRecord[]),
   ]);
+  const dueSoon = dueOrders.filter((order) => !order.customerNotifiedAt);
   const unreadRequestIds = new Set(
     requests
       .filter((item) => item.status === "pending" && new Date(item.createdAt).getTime() > requestsSeenAt && !read.has(requestKey(item.id)))
@@ -99,12 +105,12 @@ export async function loadInbox(): Promise<InboxSnapshot> {
       })
       .map((item) => item.id),
   );
-  return { approvals, requests, unreadRequestIds, unreadApprovalIds };
+  return { approvals, requests, unreadRequestIds, unreadApprovalIds, dueSoon };
 }
 
 export async function countUnseenNotifications(): Promise<number> {
-  const { unreadRequestIds, unreadApprovalIds } = await loadInbox();
-  return unreadRequestIds.size + unreadApprovalIds.size;
+  const { unreadRequestIds, unreadApprovalIds, dueSoon } = await loadInbox();
+  return unreadRequestIds.size + unreadApprovalIds.size + dueSoon.length;
 }
 
 export const markAllRead = (snapshot: InboxSnapshot) =>

@@ -6,31 +6,17 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/auth/auth-context";
 import { OptionAddForm } from "@/components/option-add-form";
 import { NativeButton } from "@/components/ui/native-button";
-import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { NativeFormField } from "@/components/ui/native-form-field";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
-import { addProductOption, getProduct, listRecipes, saveRecipe, removeProduct, removeProductOption, updateProductPricing, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
-import type { CatalogPriceOption, ProductDiscountType } from "@/domain/catalog-pricing";
+import { addProductOption, getProduct, listRecipes, saveRecipe, removeProduct, removeProductOption, updateProductName, updateProductOption, updateProductPricing, type ProductOption, type ProductOptionInput, type ProductRecord } from "@/lib/workspace";
+import type { CatalogPriceOption } from "@/domain/catalog-pricing";
 import { colors, spacing } from "@/theme/tokens";
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
-}
-
-function dateKeyAfter(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
-
-function todayKey() {
-  return dateKeyAfter(0);
-}
 
 type RecipeDraft = { key: string; ingredient: string; quantity: string; unit: string };
 
 type PricingOptionDraft = CatalogPriceOption & { packSizeInput: string; priceInput: string };
+type ProductOptionDraft = { id: string; name: string; priceInput: string };
+type CatalogTab = "options" | "pricing" | "settings";
 
 export default function CatalogItemDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
@@ -40,14 +26,19 @@ export default function CatalogItemDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
-  const [discountType, setDiscountType] = useState<ProductDiscountType>("percent");
-  const [discountValue, setDiscountValue] = useState("");
-  const [discountEnabled, setDiscountEnabled] = useState(false);
-  const [discountEndDate, setDiscountEndDate] = useState("");
   const [pricingOptions, setPricingOptions] = useState<PricingOptionDraft[]>([]);
   const [error, setError] = useState("");
   const [recipe, setRecipe] = useState<RecipeDraft[]>([]);
   const [savingRecipe, setSavingRecipe] = useState(false);
+  const [tab, setTab] = useState<CatalogTab>("options");
+  const [productName, setProductName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [optionDrafts, setOptionDrafts] = useState<ProductOptionDraft[]>([]);
+  const [savingOptionId, setSavingOptionId] = useState("");
+  const [editingOptionId, setEditingOptionId] = useState("");
+  const [addingOption, setAddingOption] = useState(false);
+  const [editingPackId, setEditingPackId] = useState("");
+  const [editingIngredientId, setEditingIngredientId] = useState("");
 
   const load = useCallback(async () => {
     if (!id) {
@@ -59,10 +50,12 @@ export default function CatalogItemDetailScreen() {
       const result = await getProduct(id);
       setProduct(result);
       if (result) {
-        setDiscountType(result.discount?.type ?? "percent");
-        setDiscountValue(result.discount?.value ? String(result.discount.value) : "");
-        setDiscountEnabled(Boolean(result.discount));
-        setDiscountEndDate(result.discount ? result.discount.endsOn ?? dateKeyAfter(7) : "");
+        setProductName(result.name);
+        setOptionDrafts(result.options.map((option) => ({
+          id: option.id,
+          name: option.name,
+          priceInput: (option.price ?? result.price).toFixed(2),
+        })));
         setPricingOptions(result.pricingOptions.map((option) => ({
           ...option,
           packSizeInput: String(option.packSize),
@@ -98,9 +91,42 @@ export default function CatalogItemDetailScreen() {
   }
 
   async function handleAddOption(input: ProductOptionInput) {
-    if (!product || !session?.user.id) return;
+    if (!product || !session?.user.id) throw new Error("Sign in to add an option.");
     const option = await addProductOption(session.user.id, product.id, input, product.options.length);
     setProduct((current) => (current ? { ...current, options: [...current.options, option] } : current));
+    setOptionDrafts((current) => [...current, {
+      id: option.id,
+      name: option.name,
+      priceInput: (option.price ?? product.price).toFixed(2),
+    }]);
+  }
+
+  async function handleSaveOption(option: ProductOptionDraft) {
+    if (!product) return;
+    const price = Number(option.priceInput);
+    if (!option.name.trim() || !option.priceInput.trim() || !Number.isFinite(price) || price < 0) {
+      setError("Enter an option name and a valid price of zero or more.");
+      return;
+    }
+    setSavingOptionId(option.id);
+    setError("");
+    try {
+      const saved = await updateProductOption(option.id, { name: option.name, price });
+      setProduct((current) => current ? {
+        ...current,
+        options: current.options.map((item) => item.id === saved.id ? saved : item),
+      } : current);
+      setOptionDrafts((current) => current.map((item) => item.id === saved.id ? {
+        ...item,
+        name: saved.name,
+        priceInput: (saved.price ?? product.price).toFixed(2),
+      } : item));
+      setEditingOptionId("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this option.");
+    } finally {
+      setSavingOptionId("");
+    }
   }
 
   function confirmRemoveOption(option: ProductOption) {
@@ -119,6 +145,8 @@ export default function CatalogItemDetailScreen() {
     try {
       await removeProductOption(option.id);
       setProduct((current) => (current ? { ...current, options: current.options.filter((item) => item.id !== option.id) } : current));
+      setOptionDrafts((current) => current.filter((item) => item.id !== option.id));
+      setEditingOptionId("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not remove this option.");
     }
@@ -138,14 +166,36 @@ export default function CatalogItemDetailScreen() {
   }
 
   function addPricingOption() {
+    const id = `pack-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setPricingOptions((current) => [...current, {
-      id: `pack-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id,
       label: "Half dozen",
       packSize: 6,
       priceCents: 0,
       packSizeInput: "6",
       priceInput: "0.00",
     }]);
+    setEditingPackId(id);
+  }
+
+  function finishPack(option: PricingOptionDraft) {
+    const pieces = Number(option.packSizeInput);
+    const price = Number(option.priceInput);
+    if (!option.label.trim() || !option.packSizeInput.trim() || !Number.isInteger(pieces) || pieces < 1 || !option.priceInput.trim() || !Number.isFinite(price) || price < 0) {
+      setError("Each pack option needs a label, a whole piece count, and a valid price.");
+      return;
+    }
+    setError("");
+    setEditingPackId("");
+  }
+
+  function finishIngredient(entry: RecipeDraft) {
+    if (!entry.ingredient.trim() || !entry.quantity.trim() || !Number.isFinite(Number(entry.quantity)) || Number(entry.quantity) <= 0) {
+      setError("Enter an ingredient name and an amount above zero.");
+      return;
+    }
+    setError("");
+    setEditingIngredientId("");
   }
 
   function updateRecipe(key: string, patch: Partial<RecipeDraft>) {
@@ -158,6 +208,7 @@ export default function CatalogItemDetailScreen() {
     setError("");
     try {
       await saveRecipe(session.user.id, product.id, recipe.map((entry) => ({ ingredient: entry.ingredient, quantity: Number(entry.quantity), unit: entry.unit })));
+      setEditingIngredientId("");
       Alert.alert("Recipe saved", "Inventory totals will use this recipe.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the recipe.");
@@ -166,22 +217,29 @@ export default function CatalogItemDetailScreen() {
     }
   }
 
+  async function handleSaveName() {
+    if (!product) return;
+    setSavingName(true);
+    setError("");
+    try {
+      await updateProductName(product.id, productName);
+      const name = productName.trim().replace(/\s+/g, " ");
+      setProduct((current) => current ? { ...current, name } : current);
+      setProductName(name);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this item.");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   async function savePricing() {
     if (!product) return;
-    const amount = Number(discountValue);
-    if (discountEnabled && (!discountValue.trim() || !Number.isFinite(amount) || amount <= 0 || (discountType === "percent" && amount > 100))) {
-      setError(discountType === "percent" ? "Enter a discount above 0 and at most 100%." : "Enter a discount amount above $0.");
-      return;
-    }
-    if (discountEnabled && (!discountEndDate || discountEndDate < todayKey())) {
-      setError("Choose an end date that is today or later.");
-      return;
-    }
     const normalizedOptions = pricingOptions.map((option) => ({
       id: option.id,
       label: option.label.trim(),
-      packSize: Number.parseInt(option.packSizeInput, 10),
-      priceCents: Math.round(Number(option.priceInput) * 100),
+      packSize: option.packSizeInput.trim() ? Number(option.packSizeInput) : NaN,
+      priceCents: option.priceInput.trim() ? Math.round(Number(option.priceInput) * 100) : NaN,
     }));
     if (normalizedOptions.some((option) => !option.label || !Number.isInteger(option.packSize) || option.packSize < 1 || !Number.isInteger(option.priceCents) || !Number.isFinite(option.priceCents) || option.priceCents < 0)) {
       setError("Each pack option needs a label, a piece count, and a valid price.");
@@ -190,18 +248,18 @@ export default function CatalogItemDetailScreen() {
     setSavingPricing(true);
     setError("");
     try {
-      const discount = discountEnabled ? { type: discountType, value: amount, endsOn: discountEndDate } : null;
       await updateProductPricing(product.id, {
-        discount,
+        discount: product.discount,
         pricingOptions: normalizedOptions,
       });
-      setProduct({ ...product, discount, pricingOptions: normalizedOptions });
-      setDiscountEnabled(Boolean(discount));
+      setProduct({ ...product, pricingOptions: normalizedOptions });
       setPricingOptions(normalizedOptions.map((option) => ({
         ...option,
         packSizeInput: String(option.packSize),
         priceInput: (option.priceCents / 100).toFixed(2),
       })));
+      setEditingPackId("");
+      Alert.alert("Pricing saved", "The item's pack prices have been updated.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save item pricing.");
     } finally {
@@ -210,89 +268,149 @@ export default function CatalogItemDetailScreen() {
   }
 
   return (
-    <AppScreen header={<SheetHeader title={product?.name || "Item details"} subtitle="Catalog item information." />}>
+    <AppScreen contentContainerStyle={styles.screen} header={<SheetHeader showSettings={false} title={product?.name || "Item details"} subtitle="Manage your catalog item." />}>
       {error ? <MessageCard title="Catalog item" message={error} tone="error" /> : null}
       {loading ? (
         <View style={styles.loading}><ActivityIndicator color={colors.teal} /><Text style={styles.muted}>Loading item…</Text></View>
       ) : product ? (
         <>
-          <ContentCard style={[styles.card, styles.optionsCard]}>
-            <Text style={styles.sectionTitle}>Options and prices</Text>
-            <Text style={styles.description}>Each option has its own single-item price. Keep at least one option for every item.</Text>
-            {product.options.length ? product.options.map((option) => (
-              <View key={option.id} style={styles.optionRow}>
-                <Text numberOfLines={2} style={styles.optionName}>{option.name}</Text>
-                <Text style={styles.muted}>{formatCurrency(option.price ?? product.price)}</Text>
-                <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" disabled={product.options.length < 2} hitSlop={8} onPress={() => confirmRemoveOption(option)} style={product.options.length < 2 && styles.disabledAction}>
-                  <Text style={styles.removeText}>Remove</Text>
-                </Pressable>
-              </View>
-            )) : <Text style={styles.description}>No saved options yet. Add a priced option to keep this item available on new orders.</Text>}
-            <OptionAddForm existingNames={product.options.map((option) => option.name)} onAdd={handleAddOption} />
-          </ContentCard>
-          <ContentCard style={[styles.card, styles.discountCard]}>
-            <Text style={styles.sectionTitle}>Temporary discount</Text>
-            <Text style={styles.description}>Discounts apply to new orders through the selected end date. Existing orders keep their saved prices.</Text>
-            {!discountEnabled ? (
-              <NativeButton
-                label="Add temporary discount"
-                onPress={() => {
-                  setDiscountEnabled(true);
-                  setDiscountEndDate(dateKeyAfter(7));
-                }}
-                variant="outlined"
-              />
-            ) : (
-              <>
-                <View style={styles.typeRow}>
-                  {(["percent", "amount"] as const).map((type) => {
-                    const selected = discountType === type;
-                    return (
-                      <Pressable key={type} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setDiscountType(type)} style={[styles.chip, selected && styles.chipSelected]}>
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{type === "percent" ? "Percent (%)" : "Amount ($)"}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <NativeFormField keyboardType="decimal-pad" label={discountType === "percent" ? "Discount percent" : "Discount amount (USD)"} onChangeText={setDiscountValue} placeholder={discountType === "percent" ? "10" : "1.00"} value={discountValue} />
-                <NativeDatePickerField label="Discount ends on" value={discountEndDate || dateKeyAfter(7)} onChange={setDiscountEndDate} />
-                <NativeButton label="Remove temporary discount" onPress={() => { setDiscountEnabled(false); setDiscountValue(""); setDiscountEndDate(""); }} variant="text" />
-              </>
-            )}
-          </ContentCard>
-          <ContentCard style={[styles.card, styles.packCard]}>
-            <Text style={styles.sectionTitle}>Pack and size prices</Text>
-            <Text style={styles.description}>Set separate prices for half dozen, dozen, or other pack sizes. These are separate from single-item options and discounts.</Text>
-            {pricingOptions.map((option) => (
-              <View key={option.id} style={styles.optionCard}>
-                <NativeFormField label="Option label" onChangeText={(label) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, label } : entry))} placeholder="Half dozen" value={option.label} />
-                <View style={styles.optionNumbers}>
-                  <View style={styles.optionField}><NativeFormField keyboardType="number-pad" label="Pieces" onChangeText={(value) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, packSizeInput: value } : entry))} placeholder="6" value={option.packSizeInput} /></View>
-                  <View style={styles.optionField}><NativeFormField keyboardType="decimal-pad" label="Pack price ($)" onChangeText={(value) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, priceInput: value } : entry))} placeholder="11.00" value={option.priceInput} /></View>
-                </View>
-                <Pressable accessibilityRole="button" onPress={() => setPricingOptions((current) => current.filter((entry) => entry.id !== option.id))}><Text style={styles.removeOption}>Remove pack option</Text></Pressable>
-              </View>
+          <View style={styles.tabs}>
+            {([
+              { value: "options", label: "Options" },
+              { value: "pricing", label: "Pricing" },
+              { value: "settings", label: "Details" },
+            ] as const).map((item) => (
+              <Pressable key={item.value} accessibilityRole="tab" accessibilityState={{ selected: tab === item.value }} onPress={() => setTab(item.value)} style={[styles.tab, tab === item.value && styles.activeTab]}>
+                <Text style={[styles.tabLabel, tab === item.value && styles.activeTabLabel]}>{item.label}</Text>
+              </Pressable>
             ))}
-            <NativeButton label="Add pack option" onPress={addPricingOption} variant="outlined" />
-          </ContentCard>
-          <ContentCard style={[styles.card, styles.optionsCard]}>
-            <Text style={styles.sectionTitle}>Recipe</Text>
-            <Text style={styles.description}>Ingredients needed to make one {product.name}. Used to total inventory for orders that have not started.</Text>
-            {recipe.map((entry) => (
-              <View key={entry.key} style={styles.optionCard}>
-                <NativeFormField label="Ingredient" onChangeText={(ingredient) => updateRecipe(entry.key, { ingredient })} placeholder="Bread flour" value={entry.ingredient} />
-                <View style={styles.optionNumbers}>
-                  <View style={styles.optionField}><NativeFormField keyboardType="decimal-pad" label="Amount" onChangeText={(quantity) => updateRecipe(entry.key, { quantity })} placeholder="120" value={entry.quantity} /></View>
-                  <View style={styles.optionField}><NativeFormField label="Unit" onChangeText={(unit) => updateRecipe(entry.key, { unit })} placeholder="g" value={entry.unit} /></View>
+          </View>
+          {tab === "options" ? (
+            <ContentCard style={styles.card}>
+              <Text style={styles.sectionTitle}>Item types and regular options</Text>
+              <Text style={styles.description}>Select an option to edit its name or price. Save each option to apply changes.</Text>
+              {optionDrafts.length ? optionDrafts.map((option) => (
+                <View key={option.id}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${option.name}, $${option.priceInput}`} accessibilityState={{ expanded: editingOptionId === option.id }} onPress={() => setEditingOptionId(editingOptionId === option.id ? "" : option.id)} style={styles.listRow}>
+                    <View style={styles.rowCopy}><Text style={styles.rowTitle}>{option.name}</Text><Text style={styles.rowMeta}>{product.options.some((saved) => saved.id === option.id && (saved.name !== option.name || (saved.price ?? product.price).toFixed(2) !== option.priceInput)) ? "Unsaved changes" : "Price per item"}</Text></View>
+                    <Text style={styles.rowValue}>${option.priceInput}</Text><Text style={styles.chevron}>›</Text>
+                  </Pressable>
+                  {editingOptionId === option.id ? <View style={styles.editor}>
+                  <NativeFormField
+                    label="Option name"
+                    onChangeText={(name) => setOptionDrafts((current) => current.map((item) => item.id === option.id ? { ...item, name } : item))}
+                    placeholder="Regular"
+                    value={option.name}
+                  />
+                  <NativeFormField
+                    keyboardType="decimal-pad"
+                    label="Price per item ($)"
+                    onChangeText={(priceInput) => setOptionDrafts((current) => current.map((item) => item.id === option.id ? { ...item, priceInput } : item))}
+                    placeholder="0.00"
+                    value={option.priceInput}
+                  />
+                  <View style={styles.optionActions}>
+                    <Pressable
+                      accessibilityLabel={`Remove option ${option.name}`}
+                      accessibilityRole="button"
+                      disabled={product.options.length < 2}
+                      hitSlop={8}
+                      onPress={() => {
+                        const existingOption = product.options.find((item) => item.id === option.id);
+                        if (existingOption) confirmRemoveOption(existingOption);
+                      }}
+                      style={product.options.length < 2 && styles.disabledAction}
+                    >
+                      <Text style={styles.removeText}>Remove</Text>
+                    </Pressable>
+                    <NativeButton
+                      disabled={savingOptionId === option.id}
+                      label={savingOptionId === option.id ? "Saving…" : "Save option"}
+                      onPress={() => void handleSaveOption(option)}
+                      variant="outlined"
+                    />
+                  </View>
+                  </View> : null}
                 </View>
-                <Pressable accessibilityRole="button" onPress={() => setRecipe((current) => current.filter((item) => item.key !== entry.key))}><Text style={styles.removeOption}>Remove ingredient</Text></Pressable>
-              </View>
-            ))}
-            <NativeButton label="Add ingredient" onPress={() => setRecipe((current) => [...current, { key: `new-${Date.now()}-${current.length}`, ingredient: "", quantity: "", unit: "" }])} variant="outlined" />
-            <NativeButton disabled={savingRecipe} label={savingRecipe ? "Saving…" : "Save recipe"} onPress={() => void handleSaveRecipe()} />
-          </ContentCard>
-          <NativeButton disabled={savingPricing} label={savingPricing ? "Saving…" : "Save discounts and pack prices"} onPress={() => void savePricing()} />
-          <NativeButton disabled={removing} label={removing ? "Removing…" : "Remove from catalog"} onPress={confirmRemove} variant="outlined" />
+              )) : (
+                <Text style={styles.description}>No saved options yet. Add a priced option to keep this item available on new orders.</Text>
+              )}
+              {addingOption ? (
+                <>
+                  <OptionAddForm existingNames={product.options.map((option) => option.name)} onAdd={async (option) => { await handleAddOption(option); setAddingOption(false); }} />
+                  <NativeButton label="Cancel" onPress={() => setAddingOption(false)} variant="text" />
+                </>
+              ) : <NativeButton label="Add option" onPress={() => setAddingOption(true)} variant="outlined" />}
+            </ContentCard>
+          ) : null}
+          {tab === "pricing" ? (
+            <>
+              <ContentCard style={styles.card}>
+                <Text style={styles.sectionTitle}>Pack and size prices</Text>
+                <Text style={styles.description}>Set separate prices for half dozen, dozen, or other pack sizes.</Text>
+                {pricingOptions.map((option) => (
+                  <View key={option.id}>
+                    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${option.label}, ${option.packSizeInput} pieces, $${option.priceInput}`} accessibilityState={{ expanded: editingPackId === option.id }} onPress={() => setEditingPackId(editingPackId === option.id ? "" : option.id)} style={styles.listRow}>
+                      <View style={styles.rowCopy}><Text style={styles.rowTitle}>{option.label || "New pack"}</Text><Text style={styles.rowMeta}>{option.packSizeInput || "0"} pieces</Text></View>
+                      <Text style={styles.rowValue}>${option.priceInput || "0.00"}</Text><Text style={styles.chevron}>›</Text>
+                    </Pressable>
+                    {editingPackId === option.id ? <View style={styles.editor}>
+                    <NativeFormField label="Option label" onChangeText={(label) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, label } : entry))} placeholder="Half dozen" value={option.label} />
+                    <View style={styles.optionNumbers}>
+                      <View style={styles.optionField}><NativeFormField keyboardType="number-pad" label="Pieces" onChangeText={(value) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, packSizeInput: value } : entry))} placeholder="6" value={option.packSizeInput} /></View>
+                      <View style={styles.optionField}><NativeFormField keyboardType="decimal-pad" label="Pack price ($)" onChangeText={(value) => setPricingOptions((current) => current.map((entry) => entry.id === option.id ? { ...entry, priceInput: value } : entry))} placeholder="11.00" value={option.priceInput} /></View>
+                    </View>
+                    <View style={styles.optionActions}>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${option.label} pack`} onPress={() => { setPricingOptions((current) => current.filter((entry) => entry.id !== option.id)); setEditingPackId(""); }}><Text style={styles.removeOption}>Remove</Text></Pressable>
+                      <NativeButton label="Done" onPress={() => finishPack(option)} variant="outlined" />
+                    </View>
+                    </View> : null}
+                  </View>
+                ))}
+                {!pricingOptions.length ? <Text style={styles.empty}>No pack prices yet.</Text> : null}
+                <NativeButton label="Add pack option" onPress={addPricingOption} variant="outlined" />
+                <Text style={styles.hint}>Save pack prices below to apply changes.</Text>
+              </ContentCard>
+              <NativeButton disabled={savingPricing} label={savingPricing ? "Saving…" : "Save pack prices"} onPress={() => void savePricing()} />
+            </>
+          ) : null}
+          {tab === "settings" ? (
+            <>
+              <ContentCard style={styles.card}>
+                <Text style={styles.sectionTitle}>Item details</Text>
+                <NativeFormField label="Catalog item name" onChangeText={setProductName} placeholder="Item name" value={productName} />
+                <NativeButton disabled={savingName || !productName.trim()} label={savingName ? "Saving…" : "Save item name"} onPress={() => void handleSaveName()} />
+              </ContentCard>
+              <ContentCard style={styles.card}>
+                <Text style={styles.sectionTitle}>Recipe</Text>
+                <Text style={styles.description}>Ingredients needed to make one {product.name}. Used to total inventory for orders that have not started.</Text>
+                {recipe.map((entry) => (
+                  <View key={entry.key}>
+                    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ingredient ${entry.ingredient || "new ingredient"}`} accessibilityState={{ expanded: editingIngredientId === entry.key }} onPress={() => setEditingIngredientId(editingIngredientId === entry.key ? "" : entry.key)} style={styles.listRow}>
+                      <View style={styles.rowCopy}><Text style={styles.rowTitle}>{entry.ingredient || "New ingredient"}</Text></View>
+                      <Text style={styles.rowValue}>{entry.quantity} {entry.unit}</Text><Text style={styles.chevron}>›</Text>
+                    </Pressable>
+                    {editingIngredientId === entry.key ? <View style={styles.editor}>
+                    <NativeFormField label="Ingredient" onChangeText={(ingredient) => updateRecipe(entry.key, { ingredient })} placeholder="Bread flour" value={entry.ingredient} />
+                    <View style={styles.optionNumbers}>
+                      <View style={styles.optionField}><NativeFormField keyboardType="decimal-pad" label="Amount" onChangeText={(quantity) => updateRecipe(entry.key, { quantity })} placeholder="120" value={entry.quantity} /></View>
+                      <View style={styles.optionField}><NativeFormField label="Unit" onChangeText={(unit) => updateRecipe(entry.key, { unit })} placeholder="g" value={entry.unit} /></View>
+                    </View>
+                    <View style={styles.optionActions}>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Remove ingredient ${entry.ingredient}`} onPress={() => { setRecipe((current) => current.filter((item) => item.key !== entry.key)); setEditingIngredientId(""); }}><Text style={styles.removeOption}>Remove</Text></Pressable>
+                      <NativeButton label="Done" onPress={() => finishIngredient(entry)} variant="outlined" />
+                    </View>
+                    </View> : null}
+                  </View>
+                ))}
+                {!recipe.length ? <Text style={styles.empty}>No ingredients yet.</Text> : null}
+                <NativeButton label="Add ingredient" onPress={() => { const key = `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; setRecipe((current) => [...current, { key, ingredient: "", quantity: "", unit: "" }]); setEditingIngredientId(key); }} variant="outlined" />
+                <Text style={styles.hint}>Save the recipe to apply ingredient changes.</Text>
+                <NativeButton disabled={savingRecipe} label={savingRecipe ? "Saving…" : "Save recipe"} onPress={() => void handleSaveRecipe()} />
+              </ContentCard>
+              <NativeButton disabled={removing} label={removing ? "Removing…" : "Delete catalog item"} onPress={confirmRemove} variant="outlined" />
+            </>
+          ) : null}
         </>
       ) : null}
     </AppScreen>
@@ -300,24 +418,29 @@ export default function CatalogItemDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  screen: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.md },
   loading: { minHeight: 220, alignItems: "center", justifyContent: "center", gap: spacing.md },
-  card: { gap: spacing.sm, padding: spacing.md },
-  optionsCard: { backgroundColor: "#EEF7F5", borderColor: "#C9DFDA" },
-  discountCard: { backgroundColor: "#FFF1EE", borderColor: "#F0C9C1" },
-  packCard: { backgroundColor: "#FFF8E9", borderColor: "#EAD9B5" },
+  tabs: { flexDirection: "row", backgroundColor: colors.border, padding: 4, borderRadius: 16, gap: spacing.xs },
+  tab: { flex: 1, minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12 },
+  activeTab: { backgroundColor: colors.card },
+  tabLabel: { color: colors.mutedText, fontSize: 13, fontWeight: "700" },
+  activeTabLabel: { color: colors.teal },
+  card: { gap: spacing.md, padding: spacing.lg },
   description: { color: colors.mutedText, fontSize: 13, lineHeight: 19 },
   sectionTitle: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
-  typeRow: { flexDirection: "row", gap: spacing.sm },
-  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.card },
-  chipSelected: { backgroundColor: colors.teal, borderColor: colors.teal },
-  chipText: { color: colors.teal, fontSize: 13, fontWeight: "600" },
-  chipTextSelected: { color: colors.card },
-  optionCard: { gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.md },
+  listRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.md, minHeight: 56 },
+  rowCopy: { flex: 1, minWidth: 0, gap: 3 },
+  rowTitle: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  rowMeta: { color: colors.mutedText, fontSize: 12 },
+  rowValue: { color: colors.teal, fontSize: 13, fontWeight: "700" },
+  chevron: { color: colors.mutedText, fontSize: 22 },
+  editor: { gap: spacing.md, paddingVertical: spacing.md },
+  empty: { color: colors.mutedText, fontSize: 13, paddingVertical: spacing.sm },
+  hint: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
   optionNumbers: { flexDirection: "row", gap: spacing.sm },
   optionField: { flex: 1 },
   removeOption: { alignSelf: "flex-start", color: colors.brick, fontSize: 13, fontWeight: "700", paddingVertical: spacing.xs },
-  optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
-  optionName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
+  optionActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
   removeText: { color: colors.brick, fontSize: 13, fontWeight: "700" },
   disabledAction: { opacity: 0.4 },
   muted: { color: colors.mutedText, fontSize: 12 },

@@ -78,6 +78,7 @@ export function OrderCard({
           paid={order.paymentTrackingAvailable ? order.paid : undefined}
           awaitingApproval={order.approvalStatus === "pending" && status !== "Cancelled"}
           approvalDeclined={order.approvalStatus === "declined" && status !== "Cancelled"}
+          notified={Boolean(order.customerNotifiedAt)}
           status={status}
         />
       </View>
@@ -134,10 +135,15 @@ const pillTones: Record<OrderRecord["status"], { background: string; color: stri
   Cancelled: { background: "#F2D9D2", color: colors.brick },
 };
 
-export function StatusPill({ status, paid, awaitingApproval, approvalDeclined }: { status: OrderRecord["status"]; paid?: boolean; awaitingApproval?: boolean; approvalDeclined?: boolean }) {
+export function StatusPill({ status, paid, awaitingApproval, approvalDeclined, notified }: { status: OrderRecord["status"]; paid?: boolean; awaitingApproval?: boolean; approvalDeclined?: boolean; notified?: boolean }) {
   const tone = pillTones[status];
   return (
     <View style={styles.pillGroup}>
+      {notified ? (
+        <View style={[styles.pill, { backgroundColor: "#D9E8F5" }]}>
+          <Text style={[styles.pillText, { color: "#1F4E79" }]}>Notified</Text>
+        </View>
+      ) : null}
       {awaitingApproval ? (
         <View style={[styles.pill, { backgroundColor: "#F3E3B3" }]}>
           <Text style={[styles.pillText, { color: "#6B4E0A" }]}>Pending approval</Text>

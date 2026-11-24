@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Pressable } from "@/components/ui/pressable";
 import { router, useFocusEffect } from "expo-router";
 
+import { DueNotifyModal, dueLabel } from "@/components/due-notify-modal";
 import { AppScreen, ContentCard, MessageCard, SheetHeader } from "@/components/ui/screen-primitives";
 import { loadInbox, markAllRead, markApprovalRead, markRequestRead, type InboxSnapshot } from "@/lib/approval-inbox";
-import type { ApprovalActivity, HolidayRequestActivity } from "@/lib/workspace";
+import type { ApprovalActivity, HolidayRequestActivity, OrderRecord } from "@/lib/workspace";
 import { colors, spacing } from "@/theme/tokens";
 
 const money = (value: number) => `$${value.toFixed(2)}`;
@@ -14,6 +15,7 @@ const money = (value: number) => `$${value.toFixed(2)}`;
 export default function NotificationsScreen() {
   const [inbox, setInbox] = useState<InboxSnapshot | null>(null);
   const [error, setError] = useState("");
+  const [notifying, setNotifying] = useState<OrderRecord | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -34,7 +36,9 @@ export default function NotificationsScreen() {
   const requests = inbox?.requests.filter((item) => inbox.unreadRequestIds.has(item.id)) ?? [];
   const approved = inbox?.approvals.filter((item) => item.status === "approved" && inbox.unreadApprovalIds.has(item.id)) ?? [];
   const declined = inbox?.approvals.filter((item) => item.status === "declined" && inbox.unreadApprovalIds.has(item.id)) ?? [];
-  const unreadCount = requests.length + approved.length + declined.length;
+  const dueSoon = inbox?.dueSoon ?? [];
+  const unreadCount = requests.length + approved.length + declined.length + dueSoon.length;
+  const markAllCount = requests.length + approved.length + declined.length;
 
   const dismiss = (kind: "request" | "approval", id: string) => {
     setInbox((current) => {
@@ -103,7 +107,7 @@ export default function NotificationsScreen() {
       {!error && inbox && unreadCount === 0 ? (
         <MessageCard title="You're all caught up" message="New requests and customer approvals appear here until you open them." />
       ) : null}
-      {unreadCount > 1 && inbox ? (
+      {unreadCount > 1 && markAllCount > 1 && inbox ? (
         <Pressable
           accessibilityRole="button"
           onPress={() => {
@@ -115,9 +119,34 @@ export default function NotificationsScreen() {
           <Text style={styles.markAllText}>Mark all as read</Text>
         </Pressable>
       ) : null}
+      {[...new Set(dueSoon.map((order) => order.dueDate))].sort().map((date) => (
+        <Fragment key={date}>
+          {section(
+          `${dueLabel(date).replace("Due ", "").replace(/^./, (c) => c.toUpperCase())} · ${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`,
+          dueSoon.filter((order) => order.dueDate === date).map((order) => (
+            <Pressable accessibilityRole="button" key={order.id} onPress={() => setNotifying(order)} style={styles.row}>
+              <View style={styles.rowCopy}>
+                <Text style={styles.rowTitle}>{order.customer} · {order.number}</Text>
+                <Text style={styles.hint}>Tap to notify the customer</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>NOTIFY</Text>
+              </View>
+            </Pressable>
+          ))
+          )}
+        </Fragment>
+      ))}
       {section("New requests", requests.map(renderRequest))}
       {section("Approved by customer", approved.map(renderApproval))}
       {section("Declined by customer", declined.map(renderApproval))}
+      {notifying ? (
+        <DueNotifyModal
+          order={notifying}
+          onClose={() => setNotifying(null)}
+          onNotified={(id) => setInbox((current) => (current ? { ...current, dueSoon: current.dueSoon.filter((item) => item.id !== id) } : current))}
+        />
+      ) : null}
     </AppScreen>
   );
 }
@@ -132,4 +161,6 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brick },
   markAll: { alignSelf: "flex-end", paddingVertical: spacing.xs },
   markAllText: { color: colors.teal, fontSize: 13, fontWeight: "700" },
+  badge: { borderRadius: 999, backgroundColor: colors.orange, paddingHorizontal: 9, paddingVertical: 3 },
+  badgeText: { color: colors.card, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
 });

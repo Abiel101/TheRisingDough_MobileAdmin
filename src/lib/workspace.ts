@@ -76,6 +76,8 @@ export type OrderRecord = {
   approvedByName: string;
   approvedTotal: number | null;
   declinedAt: string;
+  deliveryTime: string;
+  customerNotifiedAt: string;
   notes: string;
   items: OrderLine[];
   createdAt: string;
@@ -124,6 +126,8 @@ type OrderRow = {
   approved_by_name?: string | null;
   approved_total?: number | string | null;
   declined_at?: string | null;
+  delivery_time?: string | null;
+  customer_notified_at?: string | null;
   notes: string;
   created_at: string;
 };
@@ -373,6 +377,35 @@ export async function updateProductPricing(
   if (!data) throw new Error("Catalog item was not found for this account.");
 }
 
+/** Applies one temporary discount (or clears it with null) to several catalog items. */
+export async function updateProductsDiscount(ids: string[], discount: CatalogDiscount): Promise<void> {
+  if (!ids.length) return;
+  const { data, error } = await supabase
+    .from("admin_products")
+    .update({
+      discount_type: discount?.type ?? null,
+      discount_value: discount?.value ?? 0,
+      discount_ends_on: discount?.endsOn ?? null,
+    })
+    .in("id", ids)
+    .select("id");
+  throwIfError(error);
+  if ((data ?? []).length !== ids.length) throw new Error("Some catalog items could not be updated.");
+}
+
+export async function updateProductName(id: string, name: string): Promise<void> {
+  const cleanedName = name.trim().replace(/\s+/g, " ");
+  if (!cleanedName) throw new Error("An item name is required.");
+  const { data, error } = await supabase
+    .from("admin_products")
+    .update({ name: cleanedName })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("Catalog item was not found for this account.");
+}
+
 export async function getCatalogPromotion(): Promise<CatalogPromotion> {
   const { data, error } = await supabase
     .from("admin_catalog_promotions")
@@ -446,6 +479,22 @@ export async function removeProductOption(id: string): Promise<void> {
   throwIfError(error);
 }
 
+export async function updateProductOption(id: string, input: ProductOptionInput): Promise<ProductOption> {
+  const [option] = cleanOptionInputs([input]);
+  if (!option) throw new Error("Enter an option name.");
+  const { data, error } = await supabase
+    .from("admin_product_options")
+    .update({ name: option.name, unit_price: option.price })
+    .eq("id", id)
+    .select("id,product_id,name,unit_price,sort_order")
+    .single();
+  if (error?.code === "23505") throw new Error(`“${option.name}” is already an option for this item.`);
+  if (isMissingOptionsSchema(error)) throw new Error("Item options aren’t available yet. Apply the latest Supabase migration first.");
+  throwIfError(error);
+  if (!data) throw new Error("Supabase returned no option.");
+  return mapOption(data as ProductOptionRow);
+}
+
 export async function addProduct(
   ownerId: string,
   name: string,
@@ -491,6 +540,7 @@ const baseOrderColumns =
   "id,order_number,customer_id,customer_name,due_date,fulfilled_date,status,notes,created_at";
 const paymentOrderColumns = `${baseOrderColumns},paid,payment_method,payment_method_other`;
 const fullOrderColumns = `${paymentOrderColumns},discount_type,discount_value,approval_token,approval_status,approved_at,approved_by_name,approved_total,declined_at`;
+const notifiedOrderColumns = `${fullOrderColumns},delivery_time,customer_notified_at`;
 
 type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boolean };
 
@@ -498,7 +548,11 @@ type OrderFeatures = { paymentTrackingAvailable: boolean; approvalAvailable: boo
 async function selectOrderRows<T extends { error: { code?: string; message: string } | null; data: unknown }>(
   query: (columns: string) => PromiseLike<T>,
 ): Promise<{ result: T; features: OrderFeatures }> {
-  let result = await query(fullOrderColumns);
+  let result = await query(notifiedOrderColumns);
+  if (!isMissingPaymentColumn(result.error)) {
+    return { result, features: { paymentTrackingAvailable: true, approvalAvailable: true } };
+  }
+  result = await query(fullOrderColumns);
   if (!isMissingPaymentColumn(result.error)) {
     return { result, features: { paymentTrackingAvailable: true, approvalAvailable: true } };
   }
@@ -513,6 +567,7 @@ async function selectOrderRows<T extends { error: { code?: string; message: stri
 export async function listOrders(options: {
   startDate?: string;
   endDateExclusive?: string;
+  customerId?: string;
   limit?: number;
 } = {}): Promise<OrderRecord[]> {
   const { result, features } = await selectOrderRows((columns) => {
@@ -524,6 +579,7 @@ export async function listOrders(options: {
 
     if (options.startDate) query = query.gte("due_date", options.startDate);
     if (options.endDateExclusive) query = query.lt("due_date", options.endDateExclusive);
+    if (options.customerId) query = query.eq("customer_id", options.customerId);
     return query;
   });
   throwIfError(result.error);
@@ -617,11 +673,41 @@ async function mapOrderRows(
       approvedByName: row.approved_by_name ?? "",
       approvedTotal: row.approved_total == null ? null : Number(row.approved_total),
       declinedAt: row.declined_at ?? "",
+      deliveryTime: row.delivery_time ?? "",
+      customerNotifiedAt: row.customer_notified_at ?? "",
       notes: row.notes,
       items: itemsByOrder.get(row.id) ?? [],
       createdAt: row.created_at,
     };
   });
+}
+
+function addDays(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const next = new Date(year, month - 1, day + days);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+}
+
+/** Open orders due today or within the next two days, so customers can be told early. */
+export async function listDueSoonOrders(): Promise<OrderRecord[]> {
+  const today = localDateKey();
+  const orders = await listOrders({ startDate: today, endDateExclusive: addDays(today, 3) });
+  return orders.filter((order) => order.status !== "Cancelled" && order.status !== "Fulfilled");
+}
+
+/** Records the delivery time and that the customer was told their order is arriving. */
+export async function markOrderNotified(id: string, deliveryTime: string): Promise<string> {
+  const notifiedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("admin_orders")
+    .update({ delivery_time: deliveryTime.trim(), customer_notified_at: notifiedAt })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (isMissingPaymentColumn(error)) throw new Error("Apply the latest Supabase migration to track notified orders.");
+  throwIfError(error);
+  if (!data) throw new Error("Order was not found for this account.");
+  return notifiedAt;
 }
 
 export async function updateOrder(

@@ -16,6 +16,8 @@ export default function NewCatalogItemScreen() {
   const [options, setOptions] = useState<ProductOptionInput[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [addingOption, setAddingOption] = useState(false);
 
   async function saveItem() {
     if (!session?.user.id) return;
@@ -42,21 +44,38 @@ export default function NewCatalogItemScreen() {
       <ContentCard style={styles.card}>
         <NativeFormField label="Item name" onChangeText={setName} placeholder="e.g. Sourdough loaf" value={name} />
       </ContentCard>
-      <ContentCard style={[styles.card, styles.optionsCard]}>
+      <ContentCard style={styles.card}>
         <Text style={styles.sectionTitle}>Options and prices</Text>
         <Text style={styles.hint}>Every item needs at least one option. Use “Regular” for the standard version.</Text>
-        {options.map((option) => (
-          <View key={option.name} style={styles.optionRow}>
-            <Text numberOfLines={2} style={styles.optionName}>{option.name}</Text>
-            <Text style={styles.optionPrice}>${option.price.toFixed(2)}</Text>
-            <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" hitSlop={8} onPress={() => setOptions((current) => current.filter((item) => item !== option))}>
-              <Text style={styles.remove}>Remove</Text>
+        {options.map((option, index) => (
+          <View key={index}>
+            <Pressable accessibilityLabel={`Edit ${option.name}, $${option.price.toFixed(2)}`} accessibilityRole="button" accessibilityState={{ expanded: editingIndex === index }} onPress={() => { setEditingIndex(editingIndex === index ? null : index); setAddingOption(false); }} style={styles.optionRow}>
+              <Text numberOfLines={2} style={styles.optionName}>{option.name}</Text>
+              <Text style={styles.optionPrice}>${option.price.toFixed(2)}</Text>
+              <Text style={styles.chevron}>›</Text>
             </Pressable>
+            {editingIndex === index ? (
+              <>
+                <OptionAddForm key={`edit-${index}`} initialOption={option} existingNames={options.filter((_, itemIndex) => itemIndex !== index).map((item) => item.name)} onAdd={(updated) => { setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? updated : item)); setEditingIndex(null); }} />
+                <View style={styles.optionActions}>
+                  <Pressable accessibilityLabel={`Remove option ${option.name}`} accessibilityRole="button" hitSlop={8} onPress={() => { setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index)); setEditingIndex(null); }}>
+                    <Text style={styles.remove}>Remove</Text>
+                  </Pressable>
+                  <NativeButton label="Cancel" onPress={() => setEditingIndex(null)} variant="text" />
+                </View>
+              </>
+            ) : null}
           </View>
         ))}
-        <OptionAddForm existingNames={options.map((option) => option.name)} onAdd={(option) => setOptions((current) => [...current, option])} />
+        {!options.length && !addingOption ? <Text style={styles.hint}>No options added yet.</Text> : null}
+        {addingOption ? (
+          <>
+            <OptionAddForm existingNames={options.map((option) => option.name)} onAdd={(option) => { setOptions((current) => [...current, option]); setAddingOption(false); }} />
+            <NativeButton label="Cancel" onPress={() => setAddingOption(false)} variant="text" />
+          </>
+        ) : <NativeButton label="Add option" onPress={() => { setEditingIndex(null); setAddingOption(true); }} variant="outlined" />}
       </ContentCard>
-      <NativeButton disabled={saving || !name.trim() || !options.length} label={saving ? "Saving…" : "Save item"} onPress={() => void saveItem()} />
+      <NativeButton disabled={saving || !name.trim() || !options.length || addingOption || editingIndex !== null} label={saving ? "Saving…" : "Save item"} onPress={() => void saveItem()} />
     </AppScreen>
   );
 }
@@ -64,11 +83,12 @@ export default function NewCatalogItemScreen() {
 const styles = StyleSheet.create({
   screen: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
   card: { gap: spacing.md },
-  optionsCard: { backgroundColor: "#EEF7F5", borderColor: "#C9DFDA" },
   sectionTitle: { color: colors.espresso, fontSize: 15, fontWeight: "700" },
   hint: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
   optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, paddingVertical: spacing.sm },
   optionName: { flex: 1, color: colors.espresso, fontSize: 14, fontWeight: "600" },
-  optionPrice: { color: colors.mutedText, fontSize: 13 },
+  optionPrice: { color: colors.teal, fontSize: 13, fontWeight: "700" },
+  chevron: { color: colors.mutedText, fontSize: 22 },
+  optionActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   remove: { color: colors.brick, fontSize: 13, fontWeight: "700" },
 });

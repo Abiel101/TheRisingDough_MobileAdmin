@@ -12,13 +12,13 @@ export default function WorkspaceTabs() {
 			backgroundColor={colors.card}
 			blurEffect="systemMaterialLight"
 			disableTransparentOnScrollEdge
-			iconColor={{ default: colors.espresso, selected: colors.teal }}
+			iconColor={{ default: colors.mutedText, selected: colors.teal }}
 			indicatorColor={colors.cream}
 			labelStyle={{
-				default: { color: colors.espresso, fontSize: 11, fontWeight: "700" },
-				selected: { color: colors.teal, fontSize: 11, fontWeight: "800" },
+				default: { color: colors.mutedText, fontSize: 10, fontWeight: "600" },
+				selected: { color: colors.teal, fontSize: 10, fontWeight: "800" },
 			}}
-			labelVisibilityMode="labeled"
+			labelVisibilityMode="selected"
 			rippleColor={colors.cream}
 			tintColor={colors.teal}
 		>

@@ -12,13 +12,15 @@ export function OptionAddForm({
   existingNames,
   onAdd,
   disabled,
+  initialOption,
 }: {
   existingNames: readonly string[];
   onAdd: (option: ProductOptionInput) => Promise<void> | void;
   disabled?: boolean;
+  initialOption?: ProductOptionInput;
 }) {
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
+  const [name, setName] = useState(initialOption?.name ?? "");
+  const [price, setPrice] = useState(initialOption ? initialOption.price.toFixed(2) : "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -56,7 +58,7 @@ export function OptionAddForm({
       <NativeFormField label="Option name" onChangeText={setName} placeholder="e.g. Veggie" value={name} />
       <NativeFormField keyboardType="decimal-pad" label="Option price (USD)" onChangeText={setPrice} placeholder="0.00" value={price} />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <NativeButton disabled={disabled || busy || !name.trim() || !price.trim()} label={busy ? "Adding…" : "Add option"} onPress={() => void submit()} variant="outlined" />
+      <NativeButton disabled={disabled || busy || !name.trim() || !price.trim()} label={busy ? "Saving…" : initialOption ? "Update option" : "Add option"} onPress={() => void submit()} variant="outlined" />
     </View>
   );
 }

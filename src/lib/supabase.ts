@@ -1,7 +1,7 @@
 import "react-native-url-polyfill/auto";
-import "expo-sqlite/localStorage/install";
 
 import { AppState, Platform } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? "";
@@ -12,12 +12,21 @@ const supabaseKey =
 
 export const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
+const authStorage =
+  Platform.OS === "web"
+    ? globalThis.localStorage
+    : {
+        getItem: SecureStore.getItemAsync,
+        removeItem: SecureStore.deleteItemAsync,
+        setItem: SecureStore.setItemAsync,
+      };
+
 export const supabase = createClient(
   supabaseUrl || "https://missing-project.supabase.co",
   supabaseKey || "missing-publishable-key",
   {
     auth: {
-      storage: localStorage,
+      storage: authStorage,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,

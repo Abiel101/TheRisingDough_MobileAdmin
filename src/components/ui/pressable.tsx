@@ -63,7 +63,7 @@ export function Pressable({
       useNativeDriver: true,
     }).start();
 
-  const resolvedStyle = StyleSheet.flatten(typeof style === "function" ? style({ pressed, hovered: false }) : style);
+  const resolvedStyle = StyleSheet.flatten(typeof style === "function" ? style({ pressed }) : style);
   const baseOpacity = typeof resolvedStyle?.opacity === "number" ? resolvedStyle.opacity : 1;
   const iosFeedback = Platform.OS === "ios" && animated
     ? {

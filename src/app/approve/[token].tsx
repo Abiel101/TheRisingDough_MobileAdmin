@@ -6,7 +6,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { MessageCard } from "@/components/ui/screen-primitives";
 import { allocateLineTotals, groupLinesByItem, hasOptionLabel } from "@/domain/orders";
-import { approveOrder, declineOrder, getOrderForApproval, type ApprovalOrder } from "@/lib/workspace";
+import { invoiceFromApprovalOrder, printOrSaveInvoice } from "@/lib/invoice";
+import { approveOrder, declineOrder, deliveryPhotoUrl, getOrderForApproval, type ApprovalOrder } from "@/lib/workspace";
 import { colors, serifFamily, spacing } from "@/theme/tokens";
 
 const money = (value: number) =>
@@ -31,6 +32,7 @@ export default function ApproveOrderScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [confirmDecline, setConfirmDecline] = useState(false);
   const [error, setError] = useState("");
+  const [chosenTab, setChosenTab] = useState<"order" | "delivery" | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -44,7 +46,20 @@ export default function ApproveOrderScreen() {
 
   useEffect(() => {
     void Promise.resolve().then(load);
+    // Keep the page current so it switches to the delivery tab once the bakery confirms.
+    const timer = setInterval(() => void load(), 30_000);
+    return () => clearInterval(timer);
   }, [load]);
+
+  async function downloadInvoice() {
+    if (!order) return;
+    setError("");
+    try {
+      await printOrSaveInvoice(invoiceFromApprovalOrder(order));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the invoice.");
+    }
+  }
 
   async function approve() {
     if (!token) return;
@@ -114,14 +129,68 @@ export default function ApproveOrderScreen() {
     order.discountAmount,
   );
 
+  const delivered = Boolean(order.deliveredAt);
+  const tab = delivered ? (chosenTab ?? "delivery") : "order";
+  const pickedUp = order.deliveryMethod === "pickup";
+  const photo = deliveryPhotoUrl(order.deliveryPhotoPath);
+  const deliveredWhen = delivered
+    ? new Date(order.deliveredAt).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : "";
+
+  const brandBlock = (
+    <View style={styles.brandBlock}>
+      <Image source={require("../../../assets/images/icon.png")} resizeMode="contain" style={styles.appIcon} />
+      <Text style={styles.brand}>THE RISING DOUGH</Text>
+      <Text style={styles.brandCaption}>Made fresh for you</Text>
+    </View>
+  );
+  const tabBar = delivered ? (
+    <View style={styles.tabBar}>
+      {(["order", "delivery"] as const).map((key) => (
+        <Pressable
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === key }}
+          key={key}
+          onPress={() => setChosenTab(key)}
+          style={[styles.tab, tab === key && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>
+            {key === "order" ? "Order" : pickedUp ? "Pick-up" : "Delivery"}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  ) : null;
+
+  if (tab === "delivery") {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {brandBlock}
+          {tabBar}
+          <View style={styles.invoiceCard}>
+            <View style={styles.accentRule} />
+            <Text style={styles.deliveryTitle}>{pickedUp ? "Your order has been picked up" : "Your order has been delivered"}</Text>
+            <Text style={styles.deliveryMeta}>Order {order.orderNumber}</Text>
+            <Text style={styles.deliveryMeta}>{deliveredWhen}</Text>
+            {photo ? <Image accessibilityLabel="Photo of your order" resizeMode="cover" source={{ uri: photo }} style={styles.deliveryPhoto} /> : null}
+            <Text style={styles.deliveryTotal}>Order total {money(order.total)}</Text>
+          </View>
+          {error ? <MessageCard title="Something went wrong" message={error} tone="error" /> : null}
+          <Pressable accessibilityRole="button" onPress={() => void downloadInvoice()} style={styles.invoiceButton}>
+            <Text style={styles.invoiceButtonText}>Download or print invoice</Text>
+          </Pressable>
+          <Text style={styles.deliveryMeta}>Thank you for choosing The Rising Dough.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.brandBlock}>
-          <Image source={require("../../../assets/images/icon.png")} resizeMode="contain" style={styles.appIcon} />
-          <Text style={styles.brand}>THE RISING DOUGH</Text>
-          <Text style={styles.brandCaption}>Made fresh for you</Text>
-        </View>
+        {brandBlock}
+        {tabBar}
 
         <View style={styles.heading}>
           <Text style={styles.eyebrow}>ORDER REVIEW</Text>
@@ -350,4 +419,15 @@ const styles = StyleSheet.create({
   resultTitle: { color: colors.teal, fontSize: 16, fontWeight: "800", textAlign: "center" },
   resultText: { color: colors.mutedText, fontSize: 13, lineHeight: 19, textAlign: "center" },
   footer: { color: colors.mutedText, fontSize: 11, textAlign: "center", paddingTop: spacing.xs },
+  tabBar: { flexDirection: "row", width: "100%", gap: spacing.xs, padding: 4, borderRadius: 14, backgroundColor: colors.cream },
+  tab: { flex: 1, minHeight: 40, alignItems: "center", justifyContent: "center", borderRadius: 11 },
+  tabActive: { backgroundColor: colors.teal },
+  tabText: { color: colors.espresso, fontSize: 14, fontWeight: "700" },
+  tabTextActive: { color: colors.card },
+  deliveryTitle: { color: colors.espresso, fontFamily: serifFamily, fontSize: 26, fontWeight: "800", textAlign: "center" },
+  deliveryMeta: { color: colors.mutedText, fontSize: 13, textAlign: "center" },
+  deliveryPhoto: { width: "100%", aspectRatio: 4 / 3, borderRadius: 12, marginTop: spacing.sm, backgroundColor: colors.parchment },
+  deliveryTotal: { color: colors.espresso, fontSize: 15, fontWeight: "700", textAlign: "center", marginTop: spacing.sm },
+  invoiceButton: { width: "100%", minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.teal },
+  invoiceButtonText: { color: colors.card, fontSize: 14, fontWeight: "800" },
 });

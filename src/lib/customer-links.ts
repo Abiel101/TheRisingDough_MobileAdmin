@@ -13,8 +13,7 @@ export function approvalLinkFor(token: string) {
   return base && token ? `${base}/approve/${token}` : "";
 }
 
-/** Customer page confirming delivery or pick-up, with the photo and a printable invoice. */
+/** Same link as approval: its page switches to a delivery tab (photo, invoice) once confirmed. */
 export function deliveredLinkFor(token: string) {
-  const base = origin();
-  return base && token ? `${base}/delivered/${token}` : "";
+  return approvalLinkFor(token);
 }

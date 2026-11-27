@@ -1,11 +1,12 @@
 import * as Clipboard from "expo-clipboard";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useState } from "react";
 import { Platform, Share, StyleSheet, Text, View } from "react-native";
 
 import { Pressable } from "@/components/ui/pressable";
-import { deliveredLinkFor } from "@/lib/customer-links";
+import { approvalLinkFor } from "@/lib/customer-links";
 import {
   clearOrderDelivered,
   confirmOrderDelivered,
@@ -24,38 +25,40 @@ export function deliveryMessage(method: DeliveryMethod, link: string) {
     : `Your order has been delivered.${link ? ` ${link}` : ""}`;
 }
 
-/** Lets the owner record a delivery or pick-up with a photo and text the customer a link to it. */
+/** Lets the owner record a delivery or pick-up and share the customer order link. */
 export function DeliveryConfirmCard({ order, onChanged }: { order: OrderRecord; onChanged: () => Promise<void> }) {
   const [method, setMethod] = useState<DeliveryMethod>(order.deliveryMethod ?? "delivery");
-  const [photo, setPhoto] = useState<{ uri: string; mimeType?: string | null } | null>(null);
+  const [photo, setPhoto] = useState<{ uri: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const confirmed = Boolean(order.deliveredAt);
-  const link = deliveredLinkFor(order.approvalToken);
-  const savedPhoto = deliveryPhotoUrl(order.deliveryPhotoPath);
+  const link = approvalLinkFor(order.approvalToken);
+  const savedPhoto = order.deliveryMethod === "pickup" ? "" : deliveryPhotoUrl(order.deliveryPhotoPath);
   const preview = photo?.uri ?? savedPhoto;
   const confirmedMethod = order.deliveryMethod ?? method;
 
   async function pick(source: "camera" | "library") {
     setError("");
     try {
-      const permission =
-        source === "camera"
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted && Platform.OS !== "web") {
-        setError(source === "camera" ? "Allow camera access to take a photo." : "Allow photo access to choose a photo.");
-        return;
+      if (Platform.OS !== "web") {
+        const permission =
+          source === "camera"
+            ? await ImagePicker.requestCameraPermissionsAsync()
+            : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          setError(source === "camera" ? "Allow camera access to take a photo." : "Allow photo access to choose a photo.");
+          return;
+        }
       }
-      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.6, allowsEditing: false };
+      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 1, allowsEditing: false };
       const result =
         source === "camera" && Platform.OS !== "web"
           ? await ImagePicker.launchCameraAsync(options)
           : await ImagePicker.launchImageLibraryAsync(options);
       const asset = result.canceled ? null : result.assets[0];
-      if (asset) setPhoto({ uri: asset.uri, mimeType: asset.mimeType });
+      if (asset) setPhoto({ uri: asset.uri });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not open the photo picker.");
     }
@@ -66,7 +69,13 @@ export function DeliveryConfirmCard({ order, onChanged }: { order: OrderRecord; 
     setError("");
     setMessage("");
     try {
-      const photoPath = photo ? await uploadDeliveryPhoto(order.id, photo.uri, photo.mimeType) : order.deliveryPhotoPath || null;
+      let photoPath = method === "delivery" && order.deliveryMethod !== "pickup" ? order.deliveryPhotoPath || null : null;
+      if (method === "delivery" && photo) {
+        const context = ImageManipulator.manipulate(photo.uri, { maxWidth: 1200, maxHeight: 1200 });
+        const image = await context.renderAsync();
+        const compressed = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.7 });
+        photoPath = await uploadDeliveryPhoto(order.id, compressed.uri, "image/jpeg");
+      }
       await confirmOrderDelivered(order.id, method, photoPath);
       setPhoto(null);
       await onChanged();
@@ -120,19 +129,23 @@ export function DeliveryConfirmCard({ order, onChanged }: { order: OrderRecord; 
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Delivery confirmation</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Delivery confirmation</Text>
+        <Text style={[styles.badge, confirmed && styles.badgeConfirmed]}>{confirmed ? "Confirmed" : "Not confirmed"}</Text>
+      </View>
       {confirmed ? (
         <Text style={styles.hint}>
           Marked {pastTense[confirmedMethod]} on {new Date(order.deliveredAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.
         </Text>
       ) : (
-        <Text style={styles.hint}>Confirm the order was delivered or picked up and add a photo for your customer.</Text>
+        <Text style={styles.hint}>Choose how the customer received their order.</Text>
       )}
       <View style={styles.row}>
         {(["delivery", "pickup"] as const).map((option) => (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ selected: method === option }}
+            accessibilityState={{ selected: method === option, disabled: busy }}
+            disabled={busy}
             key={option}
             onPress={() => setMethod(option)}
             style={[styles.chip, method === option && styles.chipActive]}
@@ -141,17 +154,25 @@ export function DeliveryConfirmCard({ order, onChanged }: { order: OrderRecord; 
           </Pressable>
         ))}
       </View>
-      {preview ? <Image contentFit="cover" source={{ uri: preview }} style={styles.photo} /> : null}
-      <View style={styles.row}>
-        {Platform.OS !== "web" ? (
-          <Pressable accessibilityRole="button" onPress={() => void pick("camera")} style={[styles.outline, styles.flex]}>
-            <Text style={styles.outlineText}>Take photo</Text>
-          </Pressable>
-        ) : null}
-        <Pressable accessibilityRole="button" onPress={() => void pick("library")} style={[styles.outline, styles.flex]}>
-          <Text style={styles.outlineText}>{Platform.OS === "web" ? "Choose photo" : "Choose from library"}</Text>
-        </Pressable>
-      </View>
+      {method === "delivery" ? (
+        <View style={styles.photoSection}>
+          <Text style={styles.photoTitle}>Delivery photo (optional)</Text>
+          <Text style={styles.hint}>Add a photo for the customer’s order page.</Text>
+          {preview ? <Image contentFit="contain" source={{ uri: preview }} style={styles.photo} /> : null}
+          <View style={styles.row}>
+            {Platform.OS !== "web" ? (
+              <Pressable accessibilityRole="button" disabled={busy} onPress={() => void pick("camera")} style={[styles.outline, styles.flex, busy && styles.dimmed]}>
+                <Text style={styles.outlineText}>Take photo</Text>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => void pick("library")} style={[styles.outline, styles.flex, busy && styles.dimmed]}>
+              <Text style={styles.outlineText}>{Platform.OS === "web" ? "Choose photo" : "Choose from library"}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <Text style={styles.hint}>No photo is needed for pickup.</Text>
+      )}
       <Pressable accessibilityRole="button" disabled={busy} onPress={() => void confirm()} style={[styles.solid, busy && styles.dimmed]}>
         <Text style={styles.solidText}>{busy ? "Saving…" : confirmed ? "Update confirmation" : `Mark as ${pastTense[method]}`}</Text>
       </Pressable>
@@ -181,7 +202,10 @@ export function DeliveryConfirmCard({ order, onChanged }: { order: OrderRecord; 
 
 const styles = StyleSheet.create({
   card: { gap: spacing.sm, borderRadius: 16, backgroundColor: colors.card, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   title: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
+  badge: { overflow: "hidden", borderRadius: 999, backgroundColor: colors.parchment, color: colors.mutedText, fontSize: 11, fontWeight: "700", paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  badgeConfirmed: { backgroundColor: "#E4EBDD", color: colors.teal },
   hint: { color: colors.mutedText, fontSize: 12, lineHeight: 17 },
   error: { color: colors.brick, fontSize: 12, lineHeight: 17 },
   row: { flexDirection: "row", gap: spacing.sm },
@@ -190,6 +214,8 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: colors.teal, backgroundColor: colors.teal },
   chipText: { color: colors.espresso, fontSize: 13, fontWeight: "700" },
   chipTextActive: { color: colors.card },
+  photoSection: { gap: spacing.sm, borderRadius: 12, backgroundColor: colors.parchment, padding: spacing.sm },
+  photoTitle: { color: colors.espresso, fontSize: 13, fontWeight: "700" },
   photo: { width: "100%", aspectRatio: 4 / 3, borderRadius: 12, backgroundColor: colors.parchment },
   outline: { minHeight: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.card, paddingHorizontal: spacing.sm },
   outlineText: { color: colors.espresso, fontSize: 13, fontWeight: "700" },

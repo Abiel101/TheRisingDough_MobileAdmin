@@ -21,6 +21,8 @@ Catalog item options (for example Sourdough → Regular, Bagels → Plain / Ever
 
 Native sessions are stored with Expo SecureStore. The app reads the existing `admin_customer_list`, `admin_products`, `admin_orders`, and `admin_order_items` tables. It can add, edit, and delete customers; add and remove catalog items; create, edit, cancel, and delete orders; and add catalog items to existing orders. Deleting a customer keeps existing orders and their customer-name snapshot. Orders appear in Active, Completed, or Cancelled views; paid and fulfilled orders appear in Completed and are marked with green dots on the calendar. The calendar can show a compact month or week view.
 
+An individual order has Details and Status tabs below its progress bar. Details contains available order changes, invoice sharing, and ready-to-copy or share customer messages. Sharing opens the device's share sheet; the owner chooses the recipient and sends the message manually. Status contains payment, customer approval, delivery confirmation, and progress actions.
+
 ## Project foundation
 
 - `src/theme/tokens.ts` contains the bakery color and spacing tokens. The Inter and Noto Serif font assets still need to be added before those families can be used.
@@ -39,8 +41,10 @@ npx tsc --noEmit
 ## Discounts, invoices and customer approval
 
 1. Apply the pending Supabase migrations in order, including `supabase/migrations/20261104062435_add_discount_and_approval.sql` and `supabase/migrations/20261104065559_approval_decline.sql`. Check the database's applied migration history first; do not blindly rerun historical migrations.
-2. Host the web build (`npx expo export -p web`, e.g. with EAS Hosting) and set `EXPO_PUBLIC_APPROVAL_BASE_URL` to its URL. Approval links look like `<base>/approve/<token>` and work without signing in.
+2. Host the web build (`npx expo export -p web`, e.g. with EAS Hosting) and set `EXPO_PUBLIC_APPROVAL_BASE_URL` to its URL. Customer links look like `<base>/approve/<token>` and work without signing in. The page refreshes order details and status every 30 seconds, supports approval, and shows delivery confirmation and its photo when available. Previously shared `<base>/delivered/<token>` links show the same page. Deploy the updated web build for these changes to appear.
 3. Push notifications need a development/production build on a physical device (not Expo Go); Android also needs FCM credentials configured in EAS.
+
+Delivery confirmations require the applied `supabase/migrations/20261124000000_delivery_confirmation.sql` migration. Photos are optional for deliveries and aren't used for pickups. New photos are resized to at most 1200 pixels on either side and saved as compressed JPEGs before upload. The photo bucket is public: anyone with a photo URL can view it.
 
 ### Android push setup and testing
 

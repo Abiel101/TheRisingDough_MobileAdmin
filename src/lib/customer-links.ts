@@ -7,14 +7,8 @@ function origin() {
   return baseUrl || webOrigin;
 }
 
-/** Customer page for reviewing/approving an order; also shows the delivery time. */
+/** Customer page for reviewing, approving, and tracking an order. */
 export function approvalLinkFor(token: string) {
   const base = origin();
   return base && token ? `${base}/approve/${token}` : "";
-}
-
-/** Customer page confirming delivery or pick-up, with the photo and a printable invoice. */
-export function deliveredLinkFor(token: string) {
-  const base = origin();
-  return base && token ? `${base}/delivered/${token}` : "";
 }

@@ -35,6 +35,7 @@ import { formatDate } from "@/components/order-card";
 import { OrderLines } from "@/components/order-lines";
 import { NativeDatePickerField } from "@/components/ui/native-date-picker-field";
 import { DeliveryConfirmCard } from "@/components/delivery-confirm-card";
+import { CustomerUpdateCard } from "@/components/customer-update-card";
 import { approvalLinkFor } from "@/lib/customer-links";
 import { canInvoice, shareInvoicePdf } from "@/lib/invoice";
 import { NativeIcon } from "@/components/ui/native-icon";
@@ -73,6 +74,12 @@ const statusColors = {
 
 type OrderChanges = Parameters<typeof updateOrder>[1];
 type MenuMode = "closed" | "menu" | "cancel" | "delete";
+type OrderTab = "details" | "status";
+
+const orderTabs: { value: OrderTab; label: string }[] = [
+  { value: "details", label: "Details" },
+  { value: "status", label: "Status" },
+];
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value);
@@ -112,6 +119,7 @@ export default function OrderDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const [order, setOrder] = useState<OrderRecord | null>(null);
+  const [tab, setTab] = useState<OrderTab>("details");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<ProductRecord[]>([]);
@@ -366,6 +374,12 @@ export default function OrderDetailScreen() {
   const payDisabled = saving || otherMethodMissing;
   const firstName = order.customer.trim().split(/\s+/)[0] || "Customer";
   const initial = (order.customer.trim()[0] ?? "?").toUpperCase();
+  const approvalLabel = !order.approvalAvailable
+    ? "Unavailable"
+    : { draft: "Not requested", pending: "Awaiting approval", approved: "Approved", declined: "Declined" }[order.approvalStatus];
+  const deliveryLabel = order.deliveredAt
+    ? order.deliveryMethod === "pickup" ? "Picked up" : "Delivered"
+    : "Not confirmed";
 
   function changeDueDate(dateKey: string) {
     if (!order || dateKey === order.dueDate) return;
@@ -430,7 +444,7 @@ export default function OrderDetailScreen() {
           {order.approvalAvailable && order.approvalStatus !== "draft" ? (
             <View style={[styles.pill, { backgroundColor: approved ? `${colors.sage}26` : `${colors.mustard}33` }]}>
               <Text style={[styles.pillText, { color: approved ? colors.sage : colors.bronze }]}>
-                {approved ? "Approved" : "Awaiting approval"}
+                {approvalLabel}
               </Text>
             </View>
           ) : null}
@@ -468,16 +482,23 @@ export default function OrderDetailScreen() {
           {cancelled ? <Text style={styles.cancelledBanner}>This order was cancelled</Text> : null}
         </View>
 
-        {canChangeDate ? (
-          <View style={styles.card}>
-            <NativeDatePickerField label="Change due date" onChange={changeDueDate} value={order.dueDate} />
-          </View>
-        ) : !cancelled && !completed ? (
-          <Text style={styles.muted}>
-            Orders can only be changed up to {ADD_ITEMS_CUTOFF_DAYS} days before they are due. Cancel or delete this order instead.
-          </Text>
-        ) : null}
+        <View accessibilityRole="tablist" style={styles.tabs}>
+          {orderTabs.map((item) => (
+            <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === item.value }}
+              key={item.value}
+              onPress={() => setTab(item.value)}
+              style={[styles.tab, tab === item.value && styles.activeTab]}
+            >
+              <Text style={[styles.tabLabel, tab === item.value && styles.activeTabLabel]}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
+        {tab === "details" ? (
+          <>
+        <CustomerUpdateCard order={order} />
         <View style={styles.card}>
           <View style={styles.customerRow}>
             <View style={styles.avatar}>
@@ -519,6 +540,56 @@ export default function OrderDetailScreen() {
               removeDisabled={saving}
             />
           ) : <Text style={styles.muted}>No item details were saved with this order.</Text>}
+          {canAddItems && addOpen ? (
+            <View style={[styles.addCard, styles.addCardActive]}>
+              <Pressable accessibilityRole="button" onPress={() => setAddOpen(false)} style={styles.addHeader}>
+                <Text style={styles.addPlus}>＋</Text>
+                <View style={styles.itemCopy}>
+                  <Text style={styles.addTitle}>Add items</Text>
+                  <Text style={styles.muted}>Tap to collapse</Text>
+                </View>
+              </Pressable>
+              <ItemPicker
+                disabled={saving}
+                onChange={(key, quantity) => setItemQuantities((current) => ({ ...current, [key]: quantity }))}
+                products={products}
+                promotion={promotion}
+                quantities={itemQuantities}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving || !hasSelection}
+                onPress={() => void handleAddItems()}
+                style={[styles.solidAction, (saving || !hasSelection) && styles.disabled]}
+              >
+                <Text style={styles.solidActionText}>{saving ? "Adding items…" : "Add selected items"}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canAddItems }}
+              disabled={!canAddItems}
+              onPress={() => setAddOpen(true)}
+              style={[styles.addCard, canAddItems ? styles.addCardActive : styles.addCardDisabled]}
+            >
+              <View style={styles.addHeader}>
+                <Text style={[styles.addPlus, !canAddItems && styles.addTextDisabled]}>＋</Text>
+                <View style={styles.itemCopy}>
+                  <Text style={[styles.addTitle, !canAddItems && styles.addTextDisabled]}>Add items</Text>
+                  <Text style={styles.muted}>
+                    {cancelled
+                      ? "Cancelled orders can’t be changed."
+                      : completed
+                        ? "Completed orders can’t be changed."
+                        : canAddItems
+                          ? `Only until ${ADD_ITEMS_CUTOFF_DAYS} days before the due date.`
+                          : `Closed — items can only be added until ${ADD_ITEMS_CUTOFF_DAYS} days before the due date.`}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          )}
         </View>
 
         {discountAmount > 0 ? (
@@ -534,7 +605,17 @@ export default function OrderDetailScreen() {
             <InfoRow label="Total" value={formatCurrency(total)} strong />
           </View>
         ) : null}
+          </>
+        ) : null}
 
+        <View style={[styles.tabContent, tab !== "status" && styles.hiddenTab]}>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Order status</Text>
+          <InfoRow label="Progress" value={orderStatusLabels[order.status]} strong />
+          <InfoRow label="Payment" value={paymentTracked ? order.paid ? "Paid" : "Unpaid" : "Unavailable"} strong />
+          <InfoRow label="Approval" value={approvalLabel} strong />
+          <InfoRow label="Delivery" value={deliveryLabel} strong />
+        </View>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Approval</Text>
           {order.approvalAvailable && !cancelled ? (
@@ -587,16 +668,6 @@ export default function OrderDetailScreen() {
             }}
             order={order}
           />
-        ) : null}
-
-        {canInvoice(order) ? (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Invoice</Text>
-            <Text style={styles.hint}>Includes the items, any discount, the amount paid and the payment method.</Text>
-            <Pressable accessibilityRole="button" onPress={() => void shareInvoice()} style={styles.solidAction}>
-              <Text style={styles.solidActionText}>Share invoice</Text>
-            </Pressable>
-          </View>
         ) : null}
 
         {paymentTracked ? (
@@ -658,61 +729,38 @@ export default function OrderDetailScreen() {
             )}
           </View>
         ) : null}
+        </View>
 
-        {canAddItems && addOpen ? (
-          <View style={[styles.addCard, styles.addCardActive]}>
-            <Pressable accessibilityRole="button" onPress={() => setAddOpen(false)} style={styles.addHeader}>
-              <Text style={styles.addPlus}>＋</Text>
-              <View style={styles.itemCopy}>
-                <Text style={styles.addTitle}>Add items</Text>
-                <Text style={styles.muted}>Tap to collapse</Text>
-              </View>
-            </Pressable>
-            <ItemPicker
-              disabled={saving}
-              onChange={(key, quantity) => setItemQuantities((current) => ({ ...current, [key]: quantity }))}
-              products={products}
-              promotion={promotion}
-              quantities={itemQuantities}
-            />
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving || !hasSelection}
-              onPress={() => void handleAddItems()}
-              style={[styles.solidAction, (saving || !hasSelection) && styles.disabled]}
-            >
-              <Text style={styles.solidActionText}>{saving ? "Adding items…" : "Add selected items"}</Text>
+        {tab === "details" ? (
+          <>
+        {canChangeDate ? (
+          <View style={styles.card}>
+            <NativeDatePickerField label="Change due date" onChange={changeDueDate} value={order.dueDate} />
+          </View>
+        ) : !cancelled && !completed ? (
+          <Text style={styles.muted}>
+            Orders can only be changed up to {ADD_ITEMS_CUTOFF_DAYS} days before they are due. Cancel or delete this order instead.
+          </Text>
+        ) : null}
+
+        {canInvoice(order) ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Invoice</Text>
+            <Text style={styles.hint}>Includes the items, any discount, the amount paid and the payment method.</Text>
+            <Pressable accessibilityRole="button" onPress={() => void shareInvoice()} style={styles.solidAction}>
+              <Text style={styles.solidActionText}>Share invoice</Text>
             </Pressable>
           </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canAddItems }}
-            disabled={!canAddItems}
-            onPress={() => setAddOpen(true)}
-            style={[styles.addCard, canAddItems ? styles.addCardActive : styles.addCardDisabled]}
-          >
-            <View style={styles.addHeader}>
-              <Text style={[styles.addPlus, !canAddItems && styles.addTextDisabled]}>＋</Text>
-              <View style={styles.itemCopy}>
-                <Text style={[styles.addTitle, !canAddItems && styles.addTextDisabled]}>Add items</Text>
-                <Text style={styles.muted}>
-                  {cancelled
-                    ? "Cancelled orders can’t be changed."
-                    : completed
-                      ? "Completed orders can’t be changed."
-                      : canAddItems
-                        ? `Only until ${ADD_ITEMS_CUTOFF_DAYS} days before the due date.`
-                        : `Closed — items can only be added until ${ADD_ITEMS_CUTOFF_DAYS} days before the due date.`}
-                </Text>
-              </View>
-            </View>
-          </Pressable>
-        )}
+        ) : null}
+        <Pressable accessibilityRole="button" onPress={openMenu} style={styles.outlineAction}>
+          <Text style={styles.outlineActionText}>More order options</Text>
+        </Pressable>
+          </>
+        ) : null}
       </ScrollView>
       </KeyboardAvoider>
 
-      {showPayAction || advanceTarget || cancelled ? (
+      {tab === "status" && (showPayAction || advanceTarget || cancelled) ? (
         <View style={styles.footer}>
           {showPayAction ? (
             <Pressable
@@ -858,6 +906,13 @@ const styles = StyleSheet.create({
   },
   roundButtonText: { color: colors.espresso, fontSize: 16, fontWeight: "700" },
   brand: { color: colors.mutedText, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
+  tabs: { flexDirection: "row", gap: spacing.xs, padding: 4, borderRadius: 14, backgroundColor: colors.parchment },
+  tab: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 10 },
+  activeTab: { backgroundColor: colors.card },
+  tabLabel: { color: colors.mutedText, fontSize: 13, fontWeight: "700" },
+  activeTabLabel: { color: colors.teal },
+  tabContent: { gap: spacing.md },
+  hiddenTab: { display: "none" },
   content: { gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xl },
   title: { color: colors.espresso, fontFamily: serif, fontSize: 30, fontWeight: "800", lineHeight: 34 },
   pillRow: { flexDirection: "row", alignItems: "center", gap: 6 },

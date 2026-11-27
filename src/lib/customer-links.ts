@@ -12,3 +12,11 @@ export function approvalLinkFor(token: string) {
   const base = origin();
   return base && token ? `${base}/approve/${token}` : "";
 }
+<<<<<<< HEAD
+=======
+
+/** Same link as approval: its page switches to a delivery tab (photo, invoice) once confirmed. */
+export function deliveredLinkFor(token: string) {
+  return approvalLinkFor(token);
+}
+>>>>>>> ba1fffdabaecc3b6cce1e2d39ff313a0d1454b80
